@@ -39,6 +39,10 @@ jobs:
         env:
           JOB_FILE: jobs/current_job.json
           PYTHONPATH: ${{ github.workspace }}/src
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          AZURE_TTS_KEY: ${{ secrets.AZURE_TTS_KEY }}
+          AZURE_TTS_REGION: ${{ secrets.AZURE_TTS_REGION }}
+          TTS_BACKEND: ${{ secrets.TTS_BACKEND }}
 
       - name: Upload rendered video as artifact (backup)
         if: always()
