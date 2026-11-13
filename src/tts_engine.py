@@ -5,9 +5,8 @@ Uses DejaVu Sans for Ubuntu compatibility with Cyrillic + Latin scripts.
 """
 
 import asyncio
-import json
 import os
-import re
+import time
 import edge_tts
 
 VOICE_MAP = {
@@ -39,39 +38,54 @@ def seconds_to_ass(t: float) -> str:
 
 
 async def _generate_tts(text: str, voice: str, mp3_path: str, ass_path: str):
-    communicate = edge_tts.Communicate(text, voice)
-    words = []
-    audio_chunks = []
+    last_error = None
+    for attempt in range(3):
+        try:
+            communicate = edge_tts.Communicate(text, voice)
+            words = []
+            audio_chunks = []
 
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-            audio_chunks.append(chunk["data"])
-        elif chunk["type"] == "WordBoundary":
-            words.append({
-                "word": chunk["text"],
-                "start": chunk["offset"] / 1e7,
-                "duration": chunk["duration"] / 1e7,
-            })
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_chunks.append(chunk["data"])
+                elif chunk["type"] == "WordBoundary":
+                    words.append({
+                        "word": chunk["text"],
+                        "start": chunk["offset"] / 1e7,
+                        "duration": chunk["duration"] / 1e7,
+                    })
 
-    with open(mp3_path, "wb") as f:
-        for c in audio_chunks:
-            f.write(c)
+            with open(mp3_path, "wb") as f:
+                for c in audio_chunks:
+                    f.write(c)
 
-    # Build ASS captions — group ~6 words per line
-    lines = []
-    group_size = 6
-    for i in range(0, len(words), group_size):
-        group = words[i:i + group_size]
-        start = group[0]["start"]
-        end = group[-1]["start"] + group[-1]["duration"]
-        caption = " ".join(w["word"] for w in group)
-        lines.append(f"Dialogue: 0,{seconds_to_ass(start)},{seconds_to_ass(end)},Default,,0,0,0,,{caption}")
+            # Build ASS captions — group ~6 words per line
+            lines = []
+            group_size = 6
+            for i in range(0, len(words), group_size):
+                group = words[i:i + group_size]
+                start = group[0]["start"]
+                end = group[-1]["start"] + group[-1]["duration"]
+                caption = " ".join(w["word"] for w in group)
+                lines.append(
+                    f"Dialogue: 0,{seconds_to_ass(start)},{seconds_to_ass(end)},"
+                    f"Default,,0,0,0,,{caption}"
+                )
 
-    with open(ass_path, "w", encoding="utf-8") as f:
-        f.write(ASS_HEADER)
-        f.write("\n".join(lines))
+            with open(ass_path, "w", encoding="utf-8") as f:
+                f.write(ASS_HEADER)
+                f.write("\n".join(lines))
 
-    return len(audio_chunks) > 0
+            print(f"[TTS] ✅ Generated {len(audio_chunks)} audio chunks, {len(words)} words")
+            return True
+
+        except Exception as e:
+            last_error = e
+            print(f"[TTS] Attempt {attempt + 1}/3 failed: {e}")
+            if attempt < 2:
+                time.sleep(3 + attempt * 2)
+
+    raise RuntimeError(f"[TTS] All 3 attempts failed. Last error: {last_error}")
 
 
 def generate_tts(text: str, lang: str = "en", output_dir: str = "output") -> dict:
