@@ -1,13 +1,14 @@
 {
-  "title": "🔴 BREAKING: Russia-Ukraine Frontline Update — Nov 2026",
-  "description": "Latest breaking news from the Russia-Ukraine frontline. Subscribe for 24/7 Eurasia updates. #EurasiaBreaking\n\n⚠️ All content is for news & informational purposes.\n\nSources: Open-source intelligence, wire services.\n\n#Russia #Ukraine #BreakingNews #EurasiaNews #WorldNews #Shorts",
-  "script": "Breaking news from the frontline. Russian forces have launched a fresh offensive along the eastern front. Ukrainian defenders are holding key positions near Avdiivka and Zaporizhzhia. Artillery exchanges intensified overnight. Western allies are meeting today to discuss new military aid packages. The situation remains fluid. Stay with Eurasia Breaking for live updates.",
-  "search_query": "Russia Ukraine war frontline 2024",
-  "lang": "en",
-  "format": "short",
+  "title": "🔴 СРОЧНО: Обновление фронта — Россия и Украина, Ноябрь 2026",
+  "description": "Последние новости с линии фронта. Подписывайтесь на Eurasia Breaking для круглосуточных обновлений.\n\n⚠️ Контент предназначен для информационных целей.\nИсточники: открытые разведывательные данные, информационные агентства.\n\n#EurasiaBreaking #Россия #Украина #СрочноеСообщение #МировыеНовости",
+  "script": "Срочное сообщение с линии фронта. Российские войска начали новое наступление на востоке Украины вдоль Донецкого направления. Украинские защитники удерживают ключевые позиции в районе Авдеевки и Запорожья. Ночью резко усилилась артиллерийская перестрелка. По данным украинского генштаба, российские силы предпринимают попытки прорвать оборонительные позиции сразу в нескольких точках. Западные союзники сегодня проводят экстренное совещание для обсуждения новых пакетов военной помощи Украине. Президент Зеленский призвал партнёров ускорить поставки систем ПВО и дальнобойного вооружения. На севере страны зафиксированы удары по объектам энергетической инфраструктуры — без электричества остались несколько городов. Гуманитарная ситуация в прифронтовых районах продолжает ухудшаться. Польша и страны Балтии усиливают меры безопасности на своих восточных границах. НАТО проводит экстренные консультации по ситуации. Обстановка остаётся крайне напряжённой. Оставайтесь с Eurasia Breaking — мы следим за развитием событий в режиме реального времени.",
+  "search_query": "Russia Ukraine war frontline 2026",
+  "lang": "ru",
+  "format": "long",
   "tags": [
-    "Russia", "Ukraine", "breaking news", "Eurasia", "war",
-    "frontline", "world news", "shorts", "EurasiaBreaking"
+    "Россия", "Украина", "срочные новости", "EurasiaBreaking",
+    "война", "фронт", "мировые новости", "геополитика",
+    "Russia", "Ukraine", "breaking news", "war"
   ],
   "category_id": "25"
 }
