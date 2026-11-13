@@ -38,6 +38,7 @@ jobs:
         run: python src/pipeline.py
         env:
           JOB_FILE: jobs/current_job.json
+          PYTHONPATH: ${{ github.workspace }}/src
 
       - name: Upload rendered video as artifact (backup)
         if: always()
@@ -45,4 +46,5 @@ jobs:
         with:
           name: rendered-video
           path: output/
+          if-no-files-found: ignore
           retention-days: 3

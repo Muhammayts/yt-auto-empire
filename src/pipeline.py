@@ -9,6 +9,9 @@ import os
 import sys
 import datetime
 
+# Ensure src/ directory is on the path regardless of how this script is invoked
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from tts_engine import generate_tts
 from image_fetcher import fetch_images
 from video_builder import build_video
@@ -102,6 +105,4 @@ def run():
 
 
 if __name__ == "__main__":
-    # Allow running from repo root
-    sys.path.insert(0, os.path.dirname(__file__))
     run()
