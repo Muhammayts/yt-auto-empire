@@ -73,22 +73,34 @@ def scene_to_english_query(scene: str) -> str:
 
 def scene_to_image_prompt(scene: str, scene_idx: int) -> str:
     """
-    Build a Pollinations.ai prompt for a realistic news-style photo.
+    Build a high-quality Pollinations.ai prompt for a realistic news photograph.
+    Alternates between different journalistic angles for variety.
     """
     keywords = scene_to_english_query(scene)
-    styles = [
-        "photorealistic news photograph",
-        "Reuters wire photo journalism",
-        "documentary photograph",
-        "photojournalism AP news photo",
-        "high resolution news image",
+
+    angles = [
+        # Wide establishing shots
+        f"wide angle photojournalism photograph, {keywords}, "
+        f"dramatic natural lighting, 24mm lens, sharp focus throughout, "
+        f"no watermarks no text, ultra realistic, 8K",
+        # Close-up human interest
+        f"Reuters wire photo close-up, {keywords}, "
+        f"85mm portrait lens bokeh background, news photography style, "
+        f"natural daylight, no logos no text, photorealistic",
+        # Action/event shot
+        f"AP news photo, {keywords}, "
+        f"dynamic composition, shallow depth of field, golden hour lighting, "
+        f"professional DSLR, no overlays, cinematic realism",
+        # Aerial / wide context
+        f"documentary aerial photograph, {keywords}, "
+        f"overhead view, sharp detail, natural colours, "
+        f"no text no watermarks, hyper realistic",
+        # Night / dramatic
+        f"dramatic news photograph, {keywords}, "
+        f"night scene city lights, long exposure, moody atmosphere, "
+        f"professional camera, no text, photorealistic 4K",
     ]
-    style = styles[scene_idx % len(styles)]
-    return (
-        f"{style}, {keywords}, "
-        f"sharp focus, natural lighting, professional camera, "
-        f"no text overlays, no logos, cinematic"
-    )
+    return angles[scene_idx % len(angles)]
 
 
 # ── Pollinations.ai (AI image generation, completely free) ───────────────────
@@ -103,7 +115,8 @@ def _pollinations(prompt: str, dest: str, width=1920, height=1080) -> bool:
     seed = int(hashlib.md5(dest.encode()).hexdigest()[:8], 16) % 99999
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
-        f"?width={width}&height={height}&seed={seed}&nologo=true&enhance=true"
+        f"?width={width}&height={height}&seed={seed}"
+        f"&nologo=true&enhance=true&model=flux"
     )
     for attempt in range(3):
         try:

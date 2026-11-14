@@ -1,13 +1,16 @@
 """
-Video Builder — assembles final video using direct FFmpeg commands.
+Video Builder — professional quality FFmpeg pipeline.
 
-Default: 1920x1080 long-form landscape.
-Shorts (1080x1920) also supported via format_type="short".
+Quality features:
+  - Smooth 0.6s dissolve/crossfade transitions between every clip
+  - Blur-padded letterbox framing (images fully visible, no black bars)
+  - Ken-burns slow zoom on each image
+  - Color grading: slight contrast + saturation boost per clip
+  - Fade-in on first clip, fade-out on last clip
+  - ASS captions burned in (news lower-third style)
+  - High-quality h264 encoding (crf 18)
 
-Image framing: scale-to-fit with blur-padded letterbox/pillarbox
-so every image is fully visible — no cropping, no black bars.
-Zoompan adds a slow ken-burns zoom on each image.
-Captions are burned in from an ASS file.
+Formats: 1920x1080 long-form (default) | 1080x1920 Shorts
 """
 
 import json
@@ -16,56 +19,132 @@ import subprocess
 import tempfile
 
 
+TRANSITION_DURATION = 0.6   # seconds of crossfade between clips
+FADE_DURATION       = 0.4   # fade in/out at very start and end
+ZOOM_SPEED          = 0.0003 # ken-burns speed (lower = slower zoom)
+MAX_ZOOM            = 1.35
+
+
 def _run(cmd: list, label: str):
     print(f"[FFmpeg] {label}")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"[FFmpeg] STDERR (last 3000 chars):\n{result.stderr[-3000:]}")
-        raise RuntimeError(f"FFmpeg failed at: {label}")
+        print(f"[FFmpeg] STDERR:\n{result.stderr[-3000:]}")
+        raise RuntimeError(f"FFmpeg failed: {label}")
 
 
-def _get_audio_duration(mp3_path: str) -> float:
-    result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", mp3_path],
+def _get_duration(path: str) -> float:
+    r = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", path],
         capture_output=True, text=True,
     )
-    return float(json.loads(result.stdout)["format"]["duration"])
+    return float(json.loads(r.stdout)["format"]["duration"])
 
 
-def _scale_pad_vf(W: int, H: int, fps: int, n_frames: int) -> str:
+def _render_clip(img_path: str, duration: float, W: int, H: int,
+                 fps: int, out_path: str, clip_idx: int, total_clips: int):
     """
-    Build a video filter that:
-    1. Scales image to fit within WxH keeping aspect ratio
-    2. Pads with a blurred/darkened copy of the image (no black bars)
-    3. Applies a slow ken-burns zoom
+    Render one image as a video clip with:
+    - blur-padded background (no black bars)
+    - ken-burns zoom
+    - color grading (contrast + saturation boost)
+    - fade-in on first clip, fade-out on last clip
     """
-    # Background: scale up, blur, darken
-    bg = (
-        f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+    n_frames = max(int(duration * fps), 2)
+
+    # ── Background layer: scale-up + blur + darken ──────────────────────────
+    bg_vf = (
+        f"scale={W*2}:{H*2}:force_original_aspect_ratio=increase,"
         f"crop={W}:{H},"
-        f"boxblur=20:5,"
-        f"eq=brightness=-0.3"
-    )
-    # Foreground: scale to fit
-    fg = f"scale={W}:{H}:force_original_aspect_ratio=decrease,setsar=1"
-
-    # Zoompan on foreground
-    zoom_expr = "min(zoom+0.0003,1.4)"
-    zp = (
-        f"zoompan=z='{zoom_expr}':"
-        f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
-        f"d={n_frames}:s={W}x{H}:fps={fps}"
+        f"boxblur=luma_radius=25:luma_power=2,"
+        f"eq=brightness=-0.25:saturation=0.4"
     )
 
-    # Overlay fg centered on bg
-    vf = (
-        f"[0:v]split=2[bg][fg];"
-        f"[bg]{bg}[bg_out];"
-        f"[fg]{fg}[fg_scaled];"
-        f"[fg_scaled]{zp}[fg_zoom];"
-        f"[bg_out][fg_zoom]overlay=(W-w)/2:(H-h)/2,setsar=1"
+    # ── Foreground layer: fit + ken-burns zoom ───────────────────────────────
+    zoom_expr = f"'min(zoom+{ZOOM_SPEED},{MAX_ZOOM})'"
+    fg_vf = (
+        f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
+        f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black@0,"
+        f"setsar=1,"
+        f"zoompan=z={zoom_expr}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+        f":d={n_frames}:s={W}x{H}:fps={fps}"
     )
-    return vf
+
+    # ── Color grading on composite ────────────────────────────────────────────
+    grade = "eq=contrast=1.12:saturation=1.18:brightness=0.02,unsharp=3:3:0.4"
+
+    # ── Fade in/out ───────────────────────────────────────────────────────────
+    fade = ""
+    if clip_idx == 0:
+        fade = f",fade=t=in:st=0:d={FADE_DURATION}"
+    if clip_idx == total_clips - 1:
+        fade += f",fade=t=out:st={max(duration - FADE_DURATION, 0):.3f}:d={FADE_DURATION}"
+
+    # ── Full filter_complex ───────────────────────────────────────────────────
+    fc = (
+        f"[0:v]split=2[raw_bg][raw_fg];"
+        f"[raw_bg]{bg_vf}[bg];"
+        f"[raw_fg]{fg_vf}[fg_zoom];"
+        f"[bg][fg_zoom]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+        f"{grade}{fade}[out]"
+    )
+
+    _run([
+        "ffmpeg", "-y",
+        "-loop", "1", "-i", img_path,
+        "-filter_complex", fc,
+        "-map", "[out]",
+        "-t", str(duration + TRANSITION_DURATION),  # slight overlap for xfade
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-pix_fmt", "yuv420p", "-an",
+        out_path,
+    ], f"clip {clip_idx+1}/{total_clips}")
+
+
+def _build_xfade_chain(clip_paths: list, durations: list,
+                        concat_out: str, W: int, H: int):
+    """
+    Chain all clips with xfade dissolve transitions.
+    For N clips builds: [0][1]xfade→[x01]; [x01][2]xfade→[x02]; ...
+    """
+    n = len(clip_paths)
+    if n == 1:
+        # Single clip — just copy
+        _run(["ffmpeg", "-y", "-i", clip_paths[0], "-c", "copy", concat_out],
+             "single clip passthrough")
+        return
+
+    # Build inputs
+    inputs = []
+    for p in clip_paths:
+        inputs += ["-i", p]
+
+    # Build filter_complex
+    fc_parts = []
+    offset = 0.0
+    prev_label = "[0:v]"
+
+    for i in range(1, n):
+        offset += durations[i-1] - TRANSITION_DURATION
+        offset = max(offset, 0.01)
+        out_label = f"[x{i:03d}]" if i < n - 1 else "[vout]"
+        fc_parts.append(
+            f"{prev_label}[{i}:v]xfade=transition=fade"
+            f":duration={TRANSITION_DURATION}:offset={offset:.3f}{out_label}"
+        )
+        prev_label = out_label
+
+    fc = ";".join(fc_parts)
+
+    _run([
+        "ffmpeg", "-y",
+        *inputs,
+        "-filter_complex", fc,
+        "-map", "[vout]",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-pix_fmt", "yuv420p",
+        concat_out,
+    ], f"xfade chain ({n} clips)")
 
 
 def build_video(
@@ -75,63 +154,46 @@ def build_video(
     output_path: str,
     format_type: str = "long",
 ) -> str:
+
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-
     W, H = (1080, 1920) if format_type == "short" else (1920, 1080)
-    fps = 25
+    fps  = 25
 
-    total_duration = _get_audio_duration(mp3_path)
-    n_images = len(image_paths)
-    img_duration = total_duration / n_images
-    n_frames = max(int(img_duration * fps), 1)
+    total_audio = _get_duration(mp3_path)
+    n           = len(image_paths)
+    img_dur     = total_audio / n
 
-    print(f"[VB] {format_type.upper()} {W}x{H} | {total_duration:.1f}s | {n_images} clips × {img_duration:.1f}s")
+    print(f"[VB] {format_type.upper()} {W}×{H} | {total_audio:.1f}s | "
+          f"{n} clips × {img_dur:.1f}s | transitions: {TRANSITION_DURATION}s dissolve")
 
-    clip_paths = []
     with tempfile.TemporaryDirectory() as tmpdir:
 
-        # ── Step 1: render each image as a zoompan clip ──────────────────────
-        for i, img_path in enumerate(image_paths):
-            clip_out = os.path.join(tmpdir, f"clip_{i:04d}.mp4")
-            vf = _scale_pad_vf(W, H, fps, n_frames)
-            _run([
-                "ffmpeg", "-y",
-                "-loop", "1", "-i", img_path,
-                "-filter_complex", vf,
-                "-t", str(img_duration),
-                "-c:v", "libx264", "-preset", "fast", "-crf", "22",
-                "-pix_fmt", "yuv420p",
-                "-an",
-                clip_out,
-            ], f"clip {i+1}/{n_images}: {os.path.basename(img_path)}")
-            clip_paths.append(clip_out)
+        # ── Step 1: render each clip ─────────────────────────────────────────
+        clip_paths = []
+        durations  = []
+        for i, img in enumerate(image_paths):
+            out = os.path.join(tmpdir, f"clip_{i:04d}.mp4")
+            _render_clip(img, img_dur, W, H, fps, out, i, n)
+            clip_paths.append(out)
+            durations.append(img_dur)
 
-        # ── Step 2: concat all clips ─────────────────────────────────────────
-        concat_list = os.path.join(tmpdir, "concat.txt")
-        with open(concat_list, "w") as f:
-            for cp in clip_paths:
-                f.write(f"file '{cp}'\n")
+        # ── Step 2: xfade all clips together ─────────────────────────────────
+        xfade_out = os.path.join(tmpdir, "xfade.mp4")
+        _build_xfade_chain(clip_paths, durations, xfade_out, W, H)
 
-        concat_out = os.path.join(tmpdir, "concat.mp4")
+        # ── Step 3: burn captions + merge audio ──────────────────────────────
         _run([
             "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", concat_list,
-            "-c", "copy",
-            concat_out,
-        ], "concat clips")
-
-        # ── Step 3: burn captions + merge audio ─────────────────────────────
-        _run([
-            "ffmpeg", "-y",
-            "-i", concat_out,
+            "-i", xfade_out,
             "-i", mp3_path,
             "-vf", f"ass={ass_path}",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "21",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
             "-c:a", "aac", "-b:a", "192k",
             "-shortest",
             "-movflags", "+faststart",
             output_path,
-        ], "burn captions + merge audio → final video")
+        ], "burn captions + merge audio → final")
 
-    print(f"[VB] ✅ Done → {output_path}")
+    size_mb = os.path.getsize(output_path) / 1024 / 1024
+    print(f"[VB] ✅ Done → {output_path}  ({size_mb:.1f} MB)")
     return output_path

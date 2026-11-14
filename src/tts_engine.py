@@ -32,11 +32,20 @@ Timer: 100.0000
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,56,&H00FFFFFF,&H000000FF,&H00000000,&HB4000000,-1,0,0,0,100,100,0,0,1,4,1,2,40,40,80,1
+Style: Default,DejaVu Sans,62,&H00FFFFFF,&H000000FF,&H00000000,&HCC000000,-1,0,0,0,100,100,1,0,3,0,0,2,80,80,90,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
+# Style breakdown:
+#   Fontsize 62      — large, readable on any screen
+#   PrimaryColour    &H00FFFFFF  — white text
+#   BackColour       &HCC000000 — 80% opaque black box (news lower-third)
+#   Bold -1          — bold
+#   BorderStyle 3    — opaque box background (not outline)
+#   Outline 0        — no separate outline (box handles it)
+#   Alignment 2      — bottom-center
+#   MarginV 90       — 90px from bottom edge
 
 
 def seconds_to_ass(t: float) -> str:
