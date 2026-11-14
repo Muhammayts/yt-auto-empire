@@ -54,6 +54,15 @@ jobs:
           AZURE_TTS_REGION: ${{ secrets.AZURE_TTS_REGION }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
+      - name: Commit story history (prevents repeats on next run)
+        if: success()
+        run: |
+          git config user.name  "EurasiaBreaking Bot"
+          git config user.email "bot@eurasiabreaking.auto"
+          git add jobs/seen_stories.json jobs/current_job.json || true
+          git diff --cached --quiet || git commit -m "chore: update story history + job [skip ci]"
+          git push || true
+
       - name: Upload video artifact (backup)
         if: always()
         uses: actions/upload-artifact@v4
