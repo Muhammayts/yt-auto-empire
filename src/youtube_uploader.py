@@ -14,10 +14,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
-SCOPES = [
-    "https://www.googleapis.com/auth/youtube.upload",
-    "https://www.googleapis.com/auth/youtube",
-]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 TOKEN_FILE = "yt_token.json"
 SECRETS_FILE = "client_secrets.json"
 
@@ -127,10 +124,10 @@ def upload_video(
 
 def upload_thumbnail(video_id: str, thumbnail_path: str) -> bool:
     """
-    Upload a custom thumbnail to an already-uploaded video.
-    Note: requires the channel to have custom thumbnails enabled
-    (YouTube verifies channels automatically over time).
-    Returns True on success, False if thumbnails not enabled yet.
+    Upload a custom thumbnail.
+    Requires youtube (not just youtube.upload) scope — skipped gracefully
+    if the token doesn't have it.  User can set thumbnail manually in Studio.
+    The thumbnail file is kept in output/ as a reference.
     """
     if not thumbnail_path or not os.path.exists(thumbnail_path):
         print(f"[YT] No thumbnail file at {thumbnail_path}, skipping")
@@ -148,12 +145,17 @@ def upload_thumbnail(video_id: str, thumbnail_path: str) -> bool:
         print(f"[YT] ✅ Thumbnail uploaded!")
         return True
     except HttpError as e:
-        if "thumbnailsNotAllowed" in str(e) or "forbidden" in str(e).lower():
-            print(f"[YT] ⚠️  Custom thumbnails not enabled yet for this channel.")
-            print(f"[YT]    YouTube enables this after channel verification.")
-            print(f"[YT]    You can set the thumbnail manually in Studio.")
+        err_str = str(e)
+        if "insufficientPermissions" in err_str or "invalid_scope" in err_str:
+            print(f"[YT] ⚠️  Token scope: thumbnail upload needs youtube scope.")
+            print(f"[YT]    Thumbnail saved at: {thumbnail_path}")
+            print(f"[YT]    Upload it manually in YouTube Studio → Content → {video_id}")
             return False
-        print(f"[YT] Thumbnail upload error: {e}")
+        if "thumbnailsNotAllowed" in err_str or "forbidden" in err_str.lower():
+            print(f"[YT] ⚠️  Custom thumbnails not yet enabled for this channel.")
+            print(f"[YT]    Thumbnail saved at: {thumbnail_path}")
+            return False
+        print(f"[YT] Thumbnail upload error (non-fatal): {e}")
         return False
     except Exception as e:
         print(f"[YT] Thumbnail upload failed (non-fatal): {e}")

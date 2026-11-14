@@ -74,31 +74,33 @@ def scene_to_english_query(scene: str) -> str:
 def scene_to_image_prompt(scene: str, scene_idx: int) -> str:
     """
     Build a high-quality Pollinations.ai prompt for a realistic news photograph.
+    Focus: landscapes, cityscapes, military hardware, flags, maps, buildings.
+    NO human faces, NO portraits, NO AI-generated people.
     Alternates between different journalistic angles for variety.
     """
     keywords = scene_to_english_query(scene)
 
     angles = [
-        # Wide establishing shots
-        f"wide angle photojournalism photograph, {keywords}, "
-        f"dramatic natural lighting, 24mm lens, sharp focus throughout, "
-        f"no watermarks no text, ultra realistic, 8K",
-        # Close-up human interest
-        f"Reuters wire photo close-up, {keywords}, "
-        f"85mm portrait lens bokeh background, news photography style, "
-        f"natural daylight, no logos no text, photorealistic",
-        # Action/event shot
-        f"AP news photo, {keywords}, "
-        f"dynamic composition, shallow depth of field, golden hour lighting, "
-        f"professional DSLR, no overlays, cinematic realism",
-        # Aerial / wide context
-        f"documentary aerial photograph, {keywords}, "
-        f"overhead view, sharp detail, natural colours, "
-        f"no text no watermarks, hyper realistic",
-        # Night / dramatic
-        f"dramatic news photograph, {keywords}, "
-        f"night scene city lights, long exposure, moody atmosphere, "
-        f"professional camera, no text, photorealistic 4K",
+        # Wide city / landscape establishing shot
+        f"wide angle aerial cityscape photograph, {keywords}, "
+        f"dramatic natural lighting, urban skyline, buildings infrastructure, "
+        f"no people no faces, no watermarks no text, ultra realistic 8K",
+        # Military hardware / equipment
+        f"photorealistic documentary photograph, {keywords}, "
+        f"military vehicles tanks aircraft equipment, battlefield landscape, "
+        f"golden hour lighting, NO people NO faces, no logos no text, cinematic realism",
+        # Map / geography / satellite view
+        f"satellite imagery aerial view, {keywords} region geography, "
+        f"topographic landscape, natural terrain, overhead perspective, "
+        f"no people no faces, sharp detail, hyper realistic",
+        # Night city / dramatic skyline
+        f"dramatic night photograph, {keywords}, "
+        f"city lights skyline long exposure, burning horizon smoke, "
+        f"moody cinematic atmosphere, NO people NO faces, no text, photorealistic 4K",
+        # Flags / symbols / government buildings
+        f"documentary photograph, {keywords}, "
+        f"flags government buildings monuments architecture, "
+        f"dramatic sky overcast moody, NO people NO faces, professional camera, photorealistic",
     ]
     return angles[scene_idx % len(angles)]
 

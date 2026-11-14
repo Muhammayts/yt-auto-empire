@@ -70,10 +70,11 @@ def _gemini_background(prompt: str, dest: str) -> bool:
 
         model = genai.GenerativeModel("gemini-2.0-flash-exp-image-generation")
         full_prompt = (
-            f"Ultra-realistic news photograph, {prompt}, "
-            f"dramatic cinematic lighting, shallow depth of field, "
-            f"Reuters wire photo style, 16:9 aspect ratio, no text, "
-            f"no watermarks, professional photojournalism"
+            f"Ultra-realistic aerial cityscape news photograph, {prompt}, "
+            f"dramatic cinematic lighting, moody atmosphere, "
+            f"military vehicles explosions city skyline, "
+            f"NO people NO human faces, 16:9 aspect ratio, "
+            f"no text, no watermarks, photorealistic 4K"
         )
         response = model.generate_content(
             full_prompt,
@@ -219,11 +220,12 @@ def generate_thumbnail(
     os.makedirs(output_dir, exist_ok=True)
     dest = os.path.join(output_dir, "thumbnail.jpg")
 
-    # Build a vivid image prompt
+    # Build a vivid image prompt — NO faces or people (looks uncanny in thumbnails)
     prompt = (
-        f"dramatic news photograph, {search_query}, "
-        f"photojournalism, war correspondents, breaking news, "
-        f"moody dramatic lighting, cinematic"
+        f"dramatic aerial cityscape photograph, {search_query}, "
+        f"military hardware vehicles explosions fire smoke at night, "
+        f"cinematic moody lighting, NO people NO faces, no text no watermarks, "
+        f"ultra realistic photojournalism 4K"
     )
 
     # Try Gemini first (highest quality), then Pollinations, then fallback
