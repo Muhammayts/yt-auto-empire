@@ -1,0 +1,63 @@
+name: Auto — Fetch News & Upload (scheduled)
+
+# Runs every 8 hours: 06:00, 14:00, 22:00 UTC
+# = 11:00, 19:00, 03:00 Pakistan time
+# Also triggerable manually from GitHub Actions tab
+
+on:
+  schedule:
+    - cron: '0 6 * * *'    # 06:00 UTC daily  (11:00 PKT)
+    - cron: '0 14 * * *'   # 14:00 UTC daily  (19:00 PKT)
+    - cron: '0 22 * * *'   # 22:00 UTC daily  (03:00 PKT next day)
+  workflow_dispatch:
+    inputs:
+      lang:
+        description: 'Language: ru or en'
+        required: false
+        default: 'ru'
+
+jobs:
+  auto-news:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-dejavu-extra
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt
+
+      - name: Write Google credentials
+        run: |
+          echo '${{ secrets.YT_CLIENT_SECRETS_JSON }}' > client_secrets.json
+          echo '${{ secrets.YT_TOKEN_JSON }}' > yt_token.json
+
+      - name: Fetch news + render + upload
+        run: python src/pipeline.py
+        env:
+          JOB_FILE: jobs/current_job.json
+          PYTHONPATH: ${{ github.workspace }}/src
+          AUTO_NEWS: "true"
+          NEWS_LANG: ${{ github.event.inputs.lang || 'ru' }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+          TTS_BACKEND: ${{ secrets.TTS_BACKEND }}
+          AZURE_TTS_KEY: ${{ secrets.AZURE_TTS_KEY }}
+          AZURE_TTS_REGION: ${{ secrets.AZURE_TTS_REGION }}
+
+      - name: Upload video artifact (backup)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auto-news-${{ github.run_number }}
+          path: output/
+          if-no-files-found: ignore
+          retention-days: 3

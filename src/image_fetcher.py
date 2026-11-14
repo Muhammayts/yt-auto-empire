@@ -1,70 +1,196 @@
 """
-Image Fetcher — scene-aware image downloader.
+Image Fetcher — scene-aware, multi-source image downloader.
 
-Primary source: Pixabay API (free key, works from GitHub Actions CI).
-  - Sign up free at pixabay.com/api/docs/ and add PIXABAY_API_KEY secret.
-  - 100 requests/minute, 500 results/query — plenty for any video.
-
-Fallback: Wikimedia Commons (no API key required at all).
+Sources tried in order (all free, no API keys required):
+  1. Pollinations.ai  — AI-generated realistic images, scene-specific prompts
+  2. Openverse        — millions of CC-licensed real photos (no key needed)
+  3. Wikimedia Commons — encyclopedia photos (no key needed)
+  4. Fallback card    — generated news card (last resort)
 
 Scene-aware: splits script into scenes, extracts keywords per scene,
-fetches 2 relevant images per scene for dynamic, matched visuals.
+fetches 2 matched images per scene for dynamic visuals.
 """
 
 import hashlib
 import os
 import re
 import time
+import urllib.parse
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-HEADERS  = {"User-Agent": "EurasiaBreaking/1.0 (news automation)"}
-TIMEOUT  = 15
-MIN_DIM  = 400
-IMGS_PER = 2   # images per scene
+HEADERS = {"User-Agent": "EurasiaBreaking/1.0 (news automation bot)"}
+TIMEOUT = 30   # Pollinations can be slow first call
+MIN_DIM = 400
+IMGS_PER_SENTENCE = 1   # 1 image per sentence = maximum visual variety
 
 
 # ── Scene splitting ───────────────────────────────────────────────────────────
 
 def split_into_scenes(script: str) -> list:
+    """Split script into individual sentences — 1 image per sentence."""
     sentences = re.split(r'(?<=[.!?])\s+', script.strip())
     sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
-    scenes = []
-    for i in range(0, len(sentences), 2):
-        scenes.append(" ".join(sentences[i:i+2]))
-    return scenes or [script[:200]]
+    return sentences or [script[:200]]
 
 
-def scene_to_query(scene: str) -> str:
-    stopwords = {
-        "the","a","an","is","are","was","were","has","have","had",
-        "will","would","could","should","their","there","this","that",
-        "also","just","now","today","new","latest","breaking","says",
-        "said","amid","over","with","from","after","before","during",
-        "на","в","и","с","по","к","из","за","о","от","до","что","как",
-        "для","при","его","они","она","мы","вы","он","не","по","же",
-    }
+# Russian → English translations for better image generation
+_RU_EN = {
+    "российские": "Russian", "войска": "military troops", "украинские": "Ukrainian",
+    "фронт": "frontline", "наступление": "military offensive", "удары": "airstrikes",
+    "оборона": "defense line", "артиллерия": "artillery", "президент": "president",
+    "переговоры": "peace negotiations", "санкции": "economic sanctions",
+    "нато": "NATO", "солдаты": "soldiers", "танки": "tanks", "взрывы": "explosions",
+    "город": "city", "мирные": "civilians", "жители": "residents",
+    "срочно": "breaking news", "сообщение": "news report", "украина": "Ukraine",
+    "россия": "Russia", "москва": "Moscow", "киев": "Kyiv", "война": "war",
+    "силы": "forces", "позиции": "military positions", "новости": "news",
+}
+
+STOPWORDS = {
+    "the","a","an","is","are","was","were","has","have","had","will","would",
+    "could","should","their","there","this","that","also","just","now","today",
+    "new","latest","breaking","says","said","amid","over","with","from","after",
+    "before","during","and","but","for","not","они","она","мы","вы","он","не",
+    "на","в","и","с","по","к","из","за","о","от","до","что","как","для","при",
+    "его","что","это","так","уже","ещё","где","там","тут","всё","все",
+}
+
+
+def scene_to_english_query(scene: str) -> str:
+    """Extract keywords and translate Russian → English for image searches."""
     words = re.findall(r'\b[A-Za-zА-Яа-яЁё]{4,}\b', scene)
-    filtered = [w for w in words if w.lower() not in stopwords][:5]
-    # Translate common Russian war terms to English for better image results
-    translations = {
-        "российские": "Russian", "войска": "military troops",
-        "украинские": "Ukrainian", "фронт": "frontline",
-        "наступление": "offensive", "удары": "strikes",
-        "оборона": "defense", "артиллерия": "artillery",
-        "президент": "president", "переговоры": "negotiations",
-        "санкции": "sanctions", "нато": "NATO",
-    }
-    translated = []
-    for w in filtered:
-        translated.append(translations.get(w.lower(), w))
-    return " ".join(translated) if translated else "Russia news"
+    result = []
+    for w in words:
+        lower = w.lower()
+        if lower in STOPWORDS:
+            continue
+        result.append(_RU_EN.get(lower, w))
+        if len(result) >= 5:
+            break
+    return " ".join(result) if result else "Russia news geopolitics"
 
 
-# ── Downloaders ───────────────────────────────────────────────────────────────
+def scene_to_image_prompt(scene: str, scene_idx: int) -> str:
+    """
+    Build a Pollinations.ai prompt for a realistic news-style photo.
+    """
+    keywords = scene_to_english_query(scene)
+    styles = [
+        "photorealistic news photograph",
+        "Reuters wire photo journalism",
+        "documentary photograph",
+        "photojournalism AP news photo",
+        "high resolution news image",
+    ]
+    style = styles[scene_idx % len(styles)]
+    return (
+        f"{style}, {keywords}, "
+        f"sharp focus, natural lighting, professional camera, "
+        f"no text overlays, no logos, cinematic"
+    )
+
+
+# ── Pollinations.ai (AI image generation, completely free) ───────────────────
+
+def _pollinations(prompt: str, dest: str, width=1920, height=1080) -> bool:
+    """
+    Generate a realistic image via Pollinations.ai.
+    Free, no API key, works from CI. Returns True on success.
+    """
+    encoded = urllib.parse.quote(prompt)
+    # Add a seed based on dest hash for variety
+    seed = int(hashlib.md5(dest.encode()).hexdigest()[:8], 16) % 99999
+    url = (
+        f"https://image.pollinations.ai/prompt/{encoded}"
+        f"?width={width}&height={height}&seed={seed}&nologo=true&enhance=true"
+    )
+    for attempt in range(3):
+        try:
+            print(f"[IMG/AI] Generating: '{prompt[:60]}...' (attempt {attempt+1})")
+            r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, stream=True)
+            if r.status_code == 200 and len(r.content) > 10000:
+                with open(dest, "wb") as f:
+                    f.write(r.content)
+                img = Image.open(dest)
+                ok  = img.width >= MIN_DIM
+                img.close()
+                if ok:
+                    print(f"[IMG/AI] ✅ Generated {img.width}x{img.height}")
+                    return True
+                os.remove(dest)
+            else:
+                print(f"[IMG/AI] Got {r.status_code}, size={len(r.content)}")
+        except Exception as e:
+            print(f"[IMG/AI] Attempt {attempt+1} failed: {e}")
+        time.sleep(3 + attempt * 2)
+    return False
+
+
+# ── Openverse (CC-licensed real photos, no key needed) ───────────────────────
+
+def _openverse_search(query: str, count: int = 8) -> list:
+    """
+    Search Openverse (openverse.org) — millions of CC-licensed photos.
+    No API key required for basic use.
+    """
+    try:
+        r = requests.get(
+            "https://api.openverse.org/v1/images/",
+            params={
+                "q": query,
+                "license_type": "commercial",
+                "size": "large",
+                "page_size": min(count * 3, 20),
+            },
+            headers={**HEADERS, "Accept": "application/json"},
+            timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            print(f"[IMG/OV] Openverse {r.status_code} for '{query}'")
+            return []
+        results = r.json().get("results", [])
+        urls = [res.get("url", "") for res in results if res.get("url")]
+        print(f"[IMG/OV] {len(urls)} results for '{query}'")
+        return urls
+    except Exception as e:
+        print(f"[IMG/OV] Failed: {e}")
+        return []
+
+
+# ── Wikimedia Commons (no key needed) ────────────────────────────────────────
+
+def _wikimedia_search(query: str, count: int = 6) -> list:
+    try:
+        r = requests.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action": "query", "generator": "search",
+                "gsrnamespace": "6", "gsrsearch": query,
+                "gsrlimit": str(count * 3), "prop": "imageinfo",
+                "iiprop": "url|size", "iiurlwidth": "1200", "format": "json",
+            },
+            headers=HEADERS, timeout=TIMEOUT,
+        )
+        pages = r.json().get("query", {}).get("pages", {}).values()
+        urls  = []
+        for page in pages:
+            for ii in page.get("imageinfo", []):
+                url = ii.get("thumburl") or ii.get("url", "")
+                w   = ii.get("thumbwidth", 0) or ii.get("width", 0)
+                if url and w >= MIN_DIM:
+                    urls.append(url)
+        print(f"[IMG/WM] {len(urls)} results for '{query}'")
+        return urls
+    except Exception as e:
+        print(f"[IMG/WM] Failed: {e}")
+        return []
+
+
+# ── Download helper ───────────────────────────────────────────────────────────
 
 def _download(url: str, dest: str) -> bool:
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, stream=True)
             if r.status_code != 200:
@@ -80,113 +206,8 @@ def _download(url: str, dest: str) -> bool:
             os.remove(dest)
         except Exception as e:
             print(f"[IMG] Download attempt {attempt+1} failed: {e}")
-            time.sleep(1 + attempt)
+            time.sleep(1)
     return False
-
-
-# ── Pixabay API ───────────────────────────────────────────────────────────────
-
-def _pixabay_search(query: str, count: int = 10) -> list:
-    """
-    Search Pixabay. Returns list of image URLs.
-    Requires PIXABAY_API_KEY environment variable (GitHub Secret).
-    Free tier: 100 req/min, 500 results/query.
-    """
-    key = os.environ.get("PIXABAY_API_KEY", "")
-    if not key:
-        print("[IMG] PIXABAY_API_KEY not set — skipping Pixabay")
-        return []
-    try:
-        r = requests.get(
-            "https://pixabay.com/api/",
-            params={
-                "key": key,
-                "q": query,
-                "image_type": "photo",
-                "orientation": "horizontal",
-                "category": "news",
-                "min_width": 800,
-                "per_page": min(count * 3, 50),
-                "safesearch": "true",
-            },
-            headers=HEADERS,
-            timeout=TIMEOUT,
-        )
-        if r.status_code != 200:
-            print(f"[IMG] Pixabay returned {r.status_code} for '{query}'")
-            return []
-        hits = r.json().get("hits", [])
-        # Return large image URLs
-        urls = [h.get("largeImageURL") or h.get("webformatURL") for h in hits]
-        print(f"[IMG] Pixabay: {len(urls)} results for '{query}'")
-        return [u for u in urls if u]
-    except Exception as e:
-        print(f"[IMG] Pixabay search failed: {e}")
-        return []
-
-
-def _pixabay_search_broad(query: str, count: int = 10) -> list:
-    """Second attempt with no category filter."""
-    key = os.environ.get("PIXABAY_API_KEY", "")
-    if not key:
-        return []
-    try:
-        r = requests.get(
-            "https://pixabay.com/api/",
-            params={
-                "key": key,
-                "q": query,
-                "image_type": "photo",
-                "min_width": 600,
-                "per_page": min(count * 3, 50),
-                "safesearch": "true",
-            },
-            headers=HEADERS,
-            timeout=TIMEOUT,
-        )
-        hits = r.json().get("hits", []) if r.status_code == 200 else []
-        return [h.get("largeImageURL") or h.get("webformatURL") for h in hits if h.get("largeImageURL") or h.get("webformatURL")]
-    except Exception:
-        return []
-
-
-# ── Wikimedia Commons fallback (no API key) ───────────────────────────────────
-
-def _wikimedia_search(query: str, count: int = 6) -> list:
-    """
-    Search Wikimedia Commons for images. No API key required.
-    Good for news/political subjects.
-    """
-    try:
-        r = requests.get(
-            "https://commons.wikimedia.org/w/api.php",
-            params={
-                "action": "query",
-                "generator": "search",
-                "gsrnamespace": "6",
-                "gsrsearch": query,
-                "gsrlimit": str(count * 3),
-                "prop": "imageinfo",
-                "iiprop": "url|size",
-                "iiurlwidth": "1200",
-                "format": "json",
-            },
-            headers=HEADERS,
-            timeout=TIMEOUT,
-        )
-        pages = r.json().get("query", {}).get("pages", {}).values()
-        urls = []
-        for page in pages:
-            for ii in page.get("imageinfo", []):
-                url = ii.get("thumburl") or ii.get("url", "")
-                w   = ii.get("thumbwidth", 0) or ii.get("width", 0)
-                if url and w >= MIN_DIM:
-                    urls.append(url)
-        print(f"[IMG] Wikimedia: {len(urls)} results for '{query}'")
-        return urls
-    except Exception as e:
-        print(f"[IMG] Wikimedia search failed: {e}")
-        return []
 
 
 # ── Fallback card ─────────────────────────────────────────────────────────────
@@ -209,40 +230,51 @@ def _fallback_card(label: str, dest: str, size=(1920, 1080)):
     img.save(dest, "JPEG", quality=85)
 
 
-# ── Core fetch function ───────────────────────────────────────────────────────
+# ── Core fetch for one scene ──────────────────────────────────────────────────
 
-def _fetch_n_images(query: str, count: int, output_dir: str, start_idx: int) -> list:
-    """Fetch `count` images for `query`, save to output_dir, return paths."""
-    paths = []
+def _fetch_for_scene(scene: str, scene_idx: int, count: int,
+                     output_dir: str, start_idx: int) -> list:
+    query  = scene_to_english_query(scene)
+    prompt = scene_to_image_prompt(scene, scene_idx)
+    paths  = []
 
-    # 1. Try Pixabay (news category)
-    urls = _pixabay_search(query, count)
+    for i in range(count):
+        dest = os.path.join(output_dir, f"img_{start_idx+i:04d}_s{scene_idx}.jpg")
 
-    # 2. Try Pixabay broad
-    if len(urls) < count:
-        urls += _pixabay_search_broad(query, count)
-
-    # 3. Try Wikimedia
-    if len(urls) < count:
-        urls += _wikimedia_search(query, count)
-
-    seen = set()
-    for url in urls:
-        if len(paths) >= count:
-            break
-        if url in seen:
-            continue
-        seen.add(url)
-        slug = hashlib.md5(url.encode()).hexdigest()[:8]
-        dest = os.path.join(output_dir, f"img_{start_idx+len(paths):04d}_{slug}.jpg")
-        if _download(url, dest):
+        # 1. Try AI generation (Pollinations) — most scene-specific
+        if _pollinations(prompt, dest):
             paths.append(dest)
+            continue
 
-    # 4. Fallback cards for any remaining
-    while len(paths) < count:
-        dest = os.path.join(output_dir, f"img_{start_idx+len(paths):04d}_card.jpg")
-        _fallback_card(query, dest)
-        paths.append(dest)
+        # 2. Try Openverse real photos
+        urls = _openverse_search(query, count=6)
+        fetched = False
+        for url in urls:
+            slug = hashlib.md5(url.encode()).hexdigest()[:6]
+            d2   = os.path.join(output_dir, f"img_{start_idx+i:04d}_ov{slug}.jpg")
+            if _download(url, d2):
+                paths.append(d2)
+                fetched = True
+                break
+        if fetched:
+            continue
+
+        # 3. Try Wikimedia
+        wm_urls = _wikimedia_search(query, count=6)
+        for url in wm_urls:
+            slug = hashlib.md5(url.encode()).hexdigest()[:6]
+            d3   = os.path.join(output_dir, f"img_{start_idx+i:04d}_wm{slug}.jpg")
+            if _download(url, d3):
+                paths.append(d3)
+                fetched = True
+                break
+        if fetched:
+            continue
+
+        # 4. Fallback card
+        fc = os.path.join(output_dir, f"img_{start_idx+i:04d}_card.jpg")
+        _fallback_card(query, fc)
+        paths.append(fc)
 
     return paths
 
@@ -253,27 +285,31 @@ def fetch_images_for_scenes(
     script: str,
     fallback_query: str,
     output_dir: str,
-    images_per_scene: int = IMGS_PER,
+    images_per_scene: int = 2,
 ) -> list:
     os.makedirs(output_dir, exist_ok=True)
     scenes    = split_into_scenes(script)
     all_paths = []
-    print(f"[IMG] {len(scenes)} scenes → ~{len(scenes)*images_per_scene} images")
+    print(f"[IMG] {len(scenes)} scenes × {images_per_scene} = {len(scenes)*images_per_scene} images")
 
     for idx, scene in enumerate(scenes):
-        query = scene_to_query(scene)
-        print(f"[IMG] Scene {idx+1}/{len(scenes)}: '{query}'")
-        imgs  = _fetch_n_images(query, images_per_scene, output_dir, len(all_paths))
-        # If we got all fallbacks, retry with the global fallback query
-        if all(p.endswith("_card.jpg") for p in imgs):
-            print(f"[IMG] All fallbacks — retrying with '{fallback_query}'")
-            imgs = _fetch_n_images(fallback_query, images_per_scene, output_dir, len(all_paths))
+        print(f"\n[IMG] ── Scene {idx+1}/{len(scenes)} ──")
+        imgs = _fetch_for_scene(scene, idx, images_per_scene, output_dir, len(all_paths))
         all_paths.extend(imgs)
 
-    print(f"[IMG] Total images: {len(all_paths)}")
+    print(f"\n[IMG] Total images collected: {len(all_paths)}")
     return all_paths
 
 
 def fetch_images(query: str, count: int, output_dir: str, size_hint: str = "landscape") -> list:
     os.makedirs(output_dir, exist_ok=True)
-    return _fetch_n_images(query, count, output_dir, 0)
+    paths = []
+    for i in range(count):
+        dest   = os.path.join(output_dir, f"img_{i:04d}.jpg")
+        prompt = f"photorealistic news photo, {query}, journalism, sharp focus"
+        if _pollinations(prompt, dest):
+            paths.append(dest)
+        else:
+            _fallback_card(query, dest)
+            paths.append(dest)
+    return paths

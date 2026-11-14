@@ -17,8 +17,10 @@ from image_fetcher import fetch_images_for_scenes, fetch_images
 from video_builder import build_video
 from youtube_uploader import upload_video
 
-JOB_FILE   = os.environ.get("JOB_FILE", "jobs/current_job.json")
-OUTPUT_DIR = "output"
+JOB_FILE    = os.environ.get("JOB_FILE", "jobs/current_job.json")
+OUTPUT_DIR  = "output"
+AUTO_NEWS   = os.environ.get("AUTO_NEWS", "false").lower() == "true"
+NEWS_LANG   = os.environ.get("NEWS_LANG", "ru")
 
 
 def load_job(path: str) -> dict:
@@ -34,6 +36,12 @@ def run():
     print(f"\n{'='*60}")
     print(f"  EurasiaBreaking Pipeline — {datetime.datetime.utcnow().isoformat()}Z")
     print(f"{'='*60}\n")
+
+    # Auto-fetch latest news if AUTO_NEWS=true
+    if AUTO_NEWS:
+        print(f"[Pipeline] AUTO_NEWS=true — fetching latest breaking news...")
+        from news_fetcher import generate_job
+        generate_job(lang=NEWS_LANG, output_path=JOB_FILE)
 
     print(f"[Pipeline] Loading job: {JOB_FILE}")
     job = load_job(JOB_FILE)
