@@ -14,7 +14,10 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from googleapiclient.errors import HttpError
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
+SCOPES = [
+    "https://www.googleapis.com/auth/youtube.upload",
+    "https://www.googleapis.com/auth/youtube",
+]
 TOKEN_FILE = "yt_token.json"
 SECRETS_FILE = "client_secrets.json"
 
@@ -120,6 +123,41 @@ def upload_video(
     print(f"[YT] 🔒 Video is PRIVATE — go to YouTube Studio to publish:")
     print(f"[YT]    https://studio.youtube.com/video/{video_id}/edit")
     return video_id
+
+
+def upload_thumbnail(video_id: str, thumbnail_path: str) -> bool:
+    """
+    Upload a custom thumbnail to an already-uploaded video.
+    Note: requires the channel to have custom thumbnails enabled
+    (YouTube verifies channels automatically over time).
+    Returns True on success, False if thumbnails not enabled yet.
+    """
+    if not thumbnail_path or not os.path.exists(thumbnail_path):
+        print(f"[YT] No thumbnail file at {thumbnail_path}, skipping")
+        return False
+
+    print(f"[YT] Uploading thumbnail for video {video_id}...")
+    try:
+        creds   = _load_credentials()
+        youtube = build("youtube", "v3", credentials=creds)
+        media   = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+        youtube.thumbnails().set(
+            videoId=video_id,
+            media_body=media,
+        ).execute()
+        print(f"[YT] ✅ Thumbnail uploaded!")
+        return True
+    except HttpError as e:
+        if "thumbnailsNotAllowed" in str(e) or "forbidden" in str(e).lower():
+            print(f"[YT] ⚠️  Custom thumbnails not enabled yet for this channel.")
+            print(f"[YT]    YouTube enables this after channel verification.")
+            print(f"[YT]    You can set the thumbnail manually in Studio.")
+            return False
+        print(f"[YT] Thumbnail upload error: {e}")
+        return False
+    except Exception as e:
+        print(f"[YT] Thumbnail upload failed (non-fatal): {e}")
+        return False
 
 
 if __name__ == "__main__":

@@ -40,6 +40,7 @@ jobs:
           TTS_BACKEND: ${{ secrets.TTS_BACKEND }}
           AZURE_TTS_KEY: ${{ secrets.AZURE_TTS_KEY }}
           AZURE_TTS_REGION: ${{ secrets.AZURE_TTS_REGION }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Upload video artifact (backup)
         if: always()

@@ -105,18 +105,39 @@ def scene_to_image_prompt(scene: str, scene_idx: int) -> str:
 
 # ── Pollinations.ai (AI image generation, completely free) ───────────────────
 
+def _remove_watermark(img_path: str, target_w: int, target_h: int):
+    """
+    Crop away the Pollinations watermark (bottom-right corner)
+    then resize back to target dimensions.
+    Works even if nologo=true is not respected by the model.
+    """
+    try:
+        img = Image.open(img_path).convert("RGB")
+        w, h = img.size
+        # Crop bottom 85px where the watermark sits
+        crop_px = max(85, int(h * 0.075))
+        cropped = img.crop((0, 0, w, h - crop_px))
+        # Resize back to target — slightly stretched but watermark gone
+        final = cropped.resize((target_w, target_h), Image.LANCZOS)
+        final.save(img_path, "JPEG", quality=92)
+    except Exception as e:
+        print(f"[IMG/AI] Watermark removal failed (non-fatal): {e}")
+
+
 def _pollinations(prompt: str, dest: str, width=1920, height=1080) -> bool:
     """
     Generate a realistic image via Pollinations.ai.
     Free, no API key, works from CI. Returns True on success.
+    Watermark is cropped out after download.
     """
     encoded = urllib.parse.quote(prompt)
     # Add a seed based on dest hash for variety
     seed = int(hashlib.md5(dest.encode()).hexdigest()[:8], 16) % 99999
+    # nologo=true + nofeed=true both required; also try flux-realism for better quality
     url = (
         f"https://image.pollinations.ai/prompt/{encoded}"
         f"?width={width}&height={height}&seed={seed}"
-        f"&nologo=true&enhance=true&model=flux"
+        f"&nologo=true&nofeed=true&enhance=true&model=flux-realism"
     )
     for attempt in range(3):
         try:
@@ -129,7 +150,8 @@ def _pollinations(prompt: str, dest: str, width=1920, height=1080) -> bool:
                 ok  = img.width >= MIN_DIM
                 img.close()
                 if ok:
-                    print(f"[IMG/AI] ✅ Generated {img.width}x{img.height}")
+                    print(f"[IMG/AI] ✅ Generated {img.width}x{img.height} — removing watermark")
+                    _remove_watermark(dest, width, height)
                     return True
                 os.remove(dest)
             else:

@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from tts_engine import generate_tts
 from image_fetcher import fetch_images_for_scenes, fetch_images
 from video_builder import build_video
-from youtube_uploader import upload_video
+from youtube_uploader import upload_video, upload_thumbnail
+from thumbnail_generator import generate_thumbnail
 
 JOB_FILE    = os.environ.get("JOB_FILE", "jobs/current_job.json")
 OUTPUT_DIR  = "output"
@@ -88,7 +89,15 @@ def run():
         format_type=format_type,
     )
 
-    # ── 4. Upload to YouTube ───────────────────────────────────────────────
+    # ── 4. Generate thumbnail ──────────────────────────────────────────────
+    print(f"[Pipeline] Generating thumbnail...")
+    thumb_path = generate_thumbnail(
+        title=title,
+        search_query=search_query,
+        output_dir=OUTPUT_DIR,
+    )
+
+    # ── 5. Upload to YouTube ───────────────────────────────────────────────
     video_id = upload_video(
         video_path=video_path,
         title=title,
@@ -97,6 +106,9 @@ def run():
         category_id=category_id,
         privacy_status="private",
     )
+
+    # ── 6. Upload thumbnail ────────────────────────────────────────────────
+    upload_thumbnail(video_id, thumb_path)
 
     print(f"\n[Pipeline] 🎉 DONE!")
     print(f"[Pipeline] Video ID : {video_id}")
@@ -108,6 +120,7 @@ def run():
             "video_id": video_id,
             "title": title,
             "studio_url": f"https://studio.youtube.com/video/{video_id}/edit",
+            "thumbnail": thumb_path,
             "privacy": "private",
         }, f, indent=2)
 
