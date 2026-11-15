@@ -19,10 +19,8 @@ import subprocess
 import tempfile
 
 
-TRANSITION_DURATION = 0.6   # seconds of crossfade between clips
-FADE_DURATION       = 0.4   # fade in/out at very start and end
-ZOOM_SPEED          = 0.0003 # ken-burns speed (lower = slower zoom)
-MAX_ZOOM            = 1.35
+TRANSITION_DURATION = 0.5   # seconds of crossfade between clips
+FADE_DURATION       = 0.3   # fade in/out at very start and end
 
 
 def _run(cmd: list, label: str):
@@ -44,48 +42,43 @@ def _get_duration(path: str) -> float:
 def _render_clip(img_path: str, duration: float, W: int, H: int,
                  fps: int, out_path: str, clip_idx: int, total_clips: int):
     """
-    Render one image as a video clip with:
-    - blur-padded background (no black bars)
-    - ken-burns zoom
-    - color grading (contrast + saturation boost)
-    - fade-in on first clip, fade-out on last clip
+    Render one image as a video clip.
+    Fast pipeline (no zoompan) — fits within GitHub Actions 60-min limit
+    even with 40+ clips:
+      - blur-padded letterbox background
+      - colour grading
+      - fade-in on first / fade-out on last clip
     """
-    n_frames = max(int(duration * fps), 2)
-
-    # ── Background layer: scale-up + blur + darken ──────────────────────────
+    # ── Background: scale-fill + strong blur + darken ────────────────────────
     bg_vf = (
-        f"scale={W*2}:{H*2}:force_original_aspect_ratio=increase,"
+        f"scale={W}:{H}:force_original_aspect_ratio=increase,"
         f"crop={W}:{H},"
-        f"boxblur=luma_radius=25:luma_power=2,"
-        f"eq=brightness=-0.25:saturation=0.4"
+        f"boxblur=luma_radius=20:luma_power=2,"
+        f"eq=brightness=-0.3:saturation=0.35"
     )
 
-    # ── Foreground layer: fit + ken-burns zoom ───────────────────────────────
-    zoom_expr = f"'min(zoom+{ZOOM_SPEED},{MAX_ZOOM})'"
+    # ── Foreground: fit inside frame (letterbox/pillarbox) ───────────────────
     fg_vf = (
         f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
         f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=black@0,"
-        f"setsar=1,"
-        f"zoompan=z={zoom_expr}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
-        f":d={n_frames}:s={W}x{H}:fps={fps}"
+        f"setsar=1"
     )
 
-    # ── Color grading on composite ────────────────────────────────────────────
-    grade = "eq=contrast=1.12:saturation=1.18:brightness=0.02,unsharp=3:3:0.4"
+    # ── Colour grading ────────────────────────────────────────────────────────
+    grade = "eq=contrast=1.10:saturation=1.15:brightness=0.01"
 
-    # ── Fade in/out ───────────────────────────────────────────────────────────
+    # ── Fade in / out ─────────────────────────────────────────────────────────
     fade = ""
     if clip_idx == 0:
         fade = f",fade=t=in:st=0:d={FADE_DURATION}"
     if clip_idx == total_clips - 1:
         fade += f",fade=t=out:st={max(duration - FADE_DURATION, 0):.3f}:d={FADE_DURATION}"
 
-    # ── Full filter_complex ───────────────────────────────────────────────────
     fc = (
         f"[0:v]split=2[raw_bg][raw_fg];"
         f"[raw_bg]{bg_vf}[bg];"
-        f"[raw_fg]{fg_vf}[fg_zoom];"
-        f"[bg][fg_zoom]overlay=(W-w)/2:(H-h)/2,setsar=1,"
+        f"[raw_fg]{fg_vf}[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2,setsar=1,"
         f"{grade}{fade}[out]"
     )
 
@@ -94,8 +87,8 @@ def _render_clip(img_path: str, duration: float, W: int, H: int,
         "-loop", "1", "-i", img_path,
         "-filter_complex", fc,
         "-map", "[out]",
-        "-t", str(duration + TRANSITION_DURATION),  # slight overlap for xfade
-        "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+        "-t", str(duration + TRANSITION_DURATION),
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
         "-pix_fmt", "yuv420p", "-an",
         out_path,
     ], f"clip {clip_idx+1}/{total_clips}")

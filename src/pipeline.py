@@ -66,12 +66,12 @@ def run():
     img_dir = os.path.join(OUTPUT_DIR, "images")
 
     if format_type == "long":
-        # 2 images per scene — highly relevant, dynamic visuals
+        # 1 image per scene — avoids timeout on GitHub Actions free runners
         images = fetch_images_for_scenes(
             script=script,
             fallback_query=search_query,
             output_dir=img_dir,
-            images_per_scene=2,
+            images_per_scene=1,
         )
     else:
         # Shorts: simple 5-image fetch
