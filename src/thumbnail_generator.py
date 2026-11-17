@@ -2,14 +2,14 @@
 Thumbnail Generator — creates a YouTube-ready 1280x720 thumbnail.
 
 Pipeline:
-  1. Generate a photorealistic background via:
+  1. Generate a vivid background via:
        - Gemini API (google-generativeai) if GEMINI_API_KEY is set
        - Pollinations.ai as free fallback (watermark cropped out)
-  2. Composite breaking-news lower-third overlay using PIL:
+  2. Composite Japan Viral overlay using PIL:
        - Dark semi-transparent gradient bar across the bottom
-       - "EURASIA BREAKING" red badge (top-left)
+       - "🔥 TRENDING" badge (top-left, red/orange)
        - Headline text (white, bold, word-wrapped)
-       - 🔴 LIVE/BREAKING badge
+       - Channel name lower-left
   3. Save as 1280x720 JPEG (YouTube recommended size)
 
 Usage:
@@ -18,29 +18,32 @@ Usage:
 
 import hashlib
 import os
+import re
 import textwrap
 import urllib.parse
 
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-HEADERS = {"User-Agent": "EurasiaBreaking/1.0"}
+HEADERS = {"User-Agent": "JapanViral/1.0"}
 TIMEOUT = 45
 THUMB_W, THUMB_H = 1280, 720
 
 
 # ── Colour palette ─────────────────────────────────────────────────────────────
-RED     = (220, 20,  20)
-DARK_BG = (10,  10,  20,  210)   # near-black, 82% opaque
+RED     = (220, 30,  10)
+ORANGE  = (255, 90,  0)
+DARK_BG = (10,  5,   20,  210)
 WHITE   = (255, 255, 255)
-YELLOW  = (255, 215,  0)
+YELLOW  = (255, 215, 0)
 
 
 # ── Font helpers ───────────────────────────────────────────────────────────────
 
 def _load_font(size: int, bold: bool = True):
     paths = [
-        f"/usr/share/fonts/truetype/dejavu/DejaVuSans{'−Bold' if bold else ''}.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Bold.otf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ]
@@ -70,9 +73,9 @@ def _gemini_background(prompt: str, dest: str) -> bool:
 
         model = genai.GenerativeModel("gemini-2.0-flash-exp-image-generation")
         full_prompt = (
-            f"Ultra-realistic aerial cityscape news photograph, {prompt}, "
-            f"dramatic cinematic lighting, moody atmosphere, "
-            f"military vehicles explosions city skyline, "
+            f"Ultra-realistic vibrant Japan photograph, {prompt}, "
+            f"dramatic cinematic lighting, vivid colors, "
+            f"Tokyo skyline anime food technology nature, "
             f"NO people NO human faces, 16:9 aspect ratio, "
             f"no text, no watermarks, photorealistic 4K"
         )
@@ -86,7 +89,6 @@ def _gemini_background(prompt: str, dest: str) -> bool:
                 img_bytes = base64.b64decode(part.inline_data.data)
                 with open(dest, "wb") as f:
                     f.write(img_bytes)
-                # Resize to exact thumbnail dimensions
                 img = Image.open(dest).convert("RGB")
                 img = img.resize((THUMB_W, THUMB_H), Image.LANCZOS)
                 img.save(dest, "JPEG", quality=95)
@@ -117,38 +119,37 @@ def _pollinations_background(prompt: str, dest: str) -> bool:
                 # Crop bottom watermark area (bottom 7%)
                 crop_px  = int(img.height * 0.075)
                 cropped  = img.crop((0, 0, img.width, img.height - crop_px))
-                # Zoom-crop to fill exact thumbnail size (removes black bars)
                 final = cropped.resize((THUMB_W, THUMB_H), Image.LANCZOS)
                 final.save(dest, "JPEG", quality=95)
                 print(f"[THUMB/Pollinations] ✅ Background ready")
                 return True
         except Exception as e:
             print(f"[THUMB/Pollinations] Attempt {attempt+1}: {e}")
-        import time; import time as _t; _t.sleep(3)
+        import time as _t; _t.sleep(3)
     return False
 
 
 def _dark_fallback_background(dest: str, keyword: str = ""):
     """Generate a simple dark gradient background as last resort."""
-    img  = Image.new("RGB", (THUMB_W, THUMB_H), (8, 8, 20))
+    img  = Image.new("RGB", (THUMB_W, THUMB_H), (10, 5, 25))
     draw = ImageDraw.Draw(img)
-    # Subtle red diagonal line pattern for news feel
-    for x in range(0, THUMB_W + THUMB_H, 60):
-        draw.line([(x, 0), (x - THUMB_H, THUMB_H)], fill=(25, 5, 5), width=2)
-    # Faint world-map style grid
+    # Rising sun motif diagonal lines (Japan theme)
+    for x in range(0, THUMB_W + THUMB_H, 55):
+        draw.line([(x, 0), (x - THUMB_H, THUMB_H)], fill=(30, 10, 10), width=1)
+    # Subtle grid
     for y in range(0, THUMB_H, 80):
-        draw.line([(0, y), (THUMB_W, y)], fill=(20, 20, 40), width=1)
+        draw.line([(0, y), (THUMB_W, y)], fill=(20, 15, 40), width=1)
     for x in range(0, THUMB_W, 80):
-        draw.line([(x, 0), (x, THUMB_H)], fill=(20, 20, 40), width=1)
+        draw.line([(x, 0), (x, THUMB_H)], fill=(20, 15, 40), width=1)
     img.save(dest, "JPEG", quality=92)
 
 
 # ── Text overlay ───────────────────────────────────────────────────────────────
 
-def _add_news_overlay(img_path: str, headline: str, search_query: str):
+def _add_japan_overlay(img_path: str, headline: str, search_query: str):
     """
-    Add a professional breaking-news overlay onto the background image.
-    Returns the modified image (saved back to img_path).
+    Add a Japan Viral branded overlay onto the background image.
+    Red/orange trending badge, clean white headline.
     """
     img  = Image.open(img_path).convert("RGBA")
     over = Image.new("RGBA", img.size, (0, 0, 0, 0))
@@ -157,47 +158,54 @@ def _add_news_overlay(img_path: str, headline: str, search_query: str):
     W, H = img.size
 
     # ── Bottom dark gradient bar ───────────────────────────────────────────────
-    bar_top = int(H * 0.55)
+    bar_top = int(H * 0.52)
     for y in range(bar_top, H):
-        alpha = int(220 * (y - bar_top) / (H - bar_top))
-        draw.rectangle([(0, y), (W, y)], fill=(5, 5, 15, alpha))
+        alpha = int(230 * (y - bar_top) / (H - bar_top))
+        draw.rectangle([(0, y), (W, y)], fill=(5, 3, 15, alpha))
 
-    # ── "🔴 BREAKING" red badge (top-left) ───────────────────────────────────
+    # ── "🔥 TRENDING" badge (top-left) ────────────────────────────────────────
     badge_font = _load_font(36, bold=True)
-    badge_text = "● BREAKING"
+    badge_text = "TRENDING"
     bbox   = draw.textbbox((0, 0), badge_text, font=badge_font)
     bw, bh = bbox[2] - bbox[0] + 24, bbox[3] - bbox[1] + 14
-    draw.rounded_rectangle([(20, 20), (20 + bw, 20 + bh)], radius=6, fill=(*RED, 230))
+    # Gradient-style badge: use orange
+    draw.rounded_rectangle([(20, 20), (20 + bw, 20 + bh)], radius=6, fill=(*ORANGE, 230))
     draw.text((32, 27), badge_text, font=badge_font, fill=(255, 255, 255, 255))
 
-    # ── Channel name bottom-left ───────────────────────────────────────────────
-    ch_font = _load_font(32, bold=True)
-    draw.text((28, H - 48), "EURASIABREAKING", font=ch_font, fill=(*RED, 240))
+    # ── "JAPAN VIRAL" channel tag ──────────────────────────────────────────────
+    ch_font = _load_font(30, bold=True)
+    draw.text((28, H - 46), "JAPAN VIRAL", font=ch_font, fill=(*RED, 240))
 
     # ── Main headline (word-wrapped, white) ───────────────────────────────────
-    # Strip emoji from headline for cleaner rendering
-    clean_headline = re.sub(r'[^\x20-\x7EЀ-ӿ\s]', '', headline).strip()
+    # Strip emoji and Japanese punctuation for safe ASCII rendering if needed
+    clean_headline = headline.strip()
     # Remove common prefixes added by news_fetcher
-    clean_headline = re.sub(r'^(🔴\s*)?(BREAKING:|СРОЧНО:)\s*', '', clean_headline,
+    clean_headline = re.sub(r'^(🔥\s*)?(TRENDING:|話題:)\s*', '', clean_headline,
                              flags=re.IGNORECASE).strip()
 
-    hl_font   = _load_font(58, bold=True)
-    max_chars = 36
+    # Detect if headline is Japanese (CJK chars)
+    has_cjk = bool(re.search(r'[　-鿿豈-﫿]', clean_headline))
+    if has_cjk:
+        # For CJK text: shorter lines
+        max_chars = 18
+        line_h    = 72
+    else:
+        max_chars = 34
+        line_h    = 68
+
+    hl_font   = _load_font(60, bold=True)
     wrapped   = textwrap.fill(clean_headline[:120], width=max_chars)
     lines     = wrapped.split("\n")[:3]
 
-    # Measure total text block height
-    line_h = 70
     text_block_h = len(lines) * line_h
-    text_y = H - 55 - text_block_h
+    text_y = H - 58 - text_block_h
 
-    # Shadow + text
     for i, line in enumerate(lines):
         y = text_y + i * line_h
         # Drop shadow
-        draw.text((30, y + 3), line, font=hl_font, fill=(0, 0, 0, 180))
+        draw.text((32, y + 3), line, font=hl_font, fill=(0, 0, 0, 180))
         # Main text
-        draw.text((28, y), line, font=hl_font, fill=(255, 255, 255, 255))
+        draw.text((30, y), line, font=hl_font, fill=(255, 255, 255, 255))
 
     # ── Merge and save ─────────────────────────────────────────────────────────
     final = Image.alpha_composite(img, over).convert("RGB")
@@ -205,8 +213,6 @@ def _add_news_overlay(img_path: str, headline: str, search_query: str):
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
-
-import re  # already imported above, here for clarity
 
 def generate_thumbnail(
     title: str,
@@ -220,12 +226,12 @@ def generate_thumbnail(
     os.makedirs(output_dir, exist_ok=True)
     dest = os.path.join(output_dir, "thumbnail.jpg")
 
-    # Build a vivid image prompt — NO faces or people (looks uncanny in thumbnails)
+    # Vibrant Japan-themed image prompt — NO faces or people
     prompt = (
-        f"dramatic aerial cityscape photograph, {search_query}, "
-        f"military hardware vehicles explosions fire smoke at night, "
-        f"cinematic moody lighting, NO people NO faces, no text no watermarks, "
-        f"ultra realistic photojournalism 4K"
+        f"vibrant Japan photograph, {search_query} Tokyo Japan, "
+        f"neon lights cherry blossoms anime technology food culture, "
+        f"dramatic cinematic lighting, vivid saturated colors, "
+        f"NO people NO faces, no text no watermarks, ultra realistic 4K"
     )
 
     # Try Gemini first (highest quality), then Pollinations, then fallback
@@ -238,7 +244,7 @@ def generate_thumbnail(
         _dark_fallback_background(dest, search_query)
 
     # Add text overlay
-    _add_news_overlay(dest, title, search_query)
+    _add_japan_overlay(dest, title, search_query)
 
     size_kb = os.path.getsize(dest) // 1024
     print(f"[THUMB] ✅ Thumbnail → {dest}  ({size_kb} KB, {THUMB_W}×{THUMB_H})")
@@ -247,7 +253,7 @@ def generate_thumbnail(
 
 if __name__ == "__main__":
     path = generate_thumbnail(
-        title="🔴 BREAKING: Russia Launches Massive Drone Strike on Kyiv",
-        search_query="Kyiv Ukraine drone strike night explosion",
+        title="🔥 話題: Nintendo Switch 2 発売日が判明！日本中が騒然",
+        search_query="Nintendo Switch Tokyo Japan gaming trending",
     )
     print(f"Thumbnail saved: {path}")

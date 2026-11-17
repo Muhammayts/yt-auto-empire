@@ -1,4 +1,4 @@
-name: Manual — Render & Upload (custom job)
+name: Manual — Render & Upload Japan Viral (custom job)
 
 on:
   push:
@@ -17,7 +17,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-dejavu-extra
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-dejavu-extra \
+            fonts-noto-cjk fonts-noto-cjk-extra
 
       - uses: actions/setup-python@v5
         with:

@@ -21,7 +21,7 @@ from thumbnail_generator import generate_thumbnail
 JOB_FILE    = os.environ.get("JOB_FILE", "jobs/current_job.json")
 OUTPUT_DIR  = "output"
 AUTO_NEWS   = os.environ.get("AUTO_NEWS", "false").lower() == "true"
-NEWS_LANG   = os.environ.get("NEWS_LANG", "ru")
+NEWS_LANG   = os.environ.get("NEWS_LANG", "ja")
 
 
 def load_job(path: str) -> dict:
@@ -35,12 +35,12 @@ def load_job(path: str) -> dict:
 
 def run():
     print(f"\n{'='*60}")
-    print(f"  EurasiaBreaking Pipeline — {datetime.datetime.utcnow().isoformat()}Z")
+    print(f"  Japan Viral Pipeline — {datetime.datetime.utcnow().isoformat()}Z")
     print(f"{'='*60}\n")
 
     # Auto-fetch latest news if AUTO_NEWS=true
     if AUTO_NEWS:
-        print(f"[Pipeline] AUTO_NEWS=true — fetching latest breaking news...")
+        print(f"[Pipeline] AUTO_NEWS=true — fetching latest trending Japan content...")
         from news_fetcher import generate_job
         generate_job(lang=NEWS_LANG, output_path=JOB_FILE)
 
@@ -50,11 +50,11 @@ def run():
     title        = job["title"]
     script       = job["script"]
     search_query = job["search_query"]
-    lang         = job.get("lang", "ru")          # default Russian
+    lang         = job.get("lang", "ja")            # default Japanese
     format_type  = job.get("format", "long")       # default long-form
-    tags         = job.get("tags", ["news", "Russia", "EurasiaBreaking"])
+    tags         = job.get("tags", ["Japan", "viral", "JapanViral", "trending"])
     description  = job.get("description", title)
-    category_id  = job.get("category_id", "25")
+    category_id  = job.get("category_id", "24")   # 24 = Entertainment
 
     print(f"[Pipeline] Title  : {title}")
     print(f"[Pipeline] Lang   : {lang}  |  Format: {format_type}")

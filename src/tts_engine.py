@@ -9,8 +9,9 @@ Backend priority (automatic fallback chain):
 Set TTS_BACKEND env var to force: "edge", "gtts", or "azure"
 
 Languages:
-  en  →  en-US-AndrewNeural  (edge) | en  (gTTS)
-  ru  →  ru-RU-SvetlanaNeural (edge) | ru  (gTTS) [DmitryNeural blocked on some CI]
+  en  →  en-US-AndrewNeural   (edge) | en  (gTTS)
+  ja  →  ja-JP-NanamiNeural   (edge) | ja  (gTTS)
+  ru  →  ru-RU-SvetlanaNeural (edge) | ru  (gTTS)
 """
 
 import asyncio
@@ -26,9 +27,10 @@ from gtts import gTTS
 # ── Voice / language maps ─────────────────────────────────────────────────────
 EDGE_VOICES = {
     "en": ["en-US-AndrewNeural", "en-US-GuyNeural"],
+    "ja": ["ja-JP-NanamiNeural", "ja-JP-KeitaNeural"],
     "ru": ["ru-RU-SvetlanaNeural", "ru-RU-DmitryNeural"],
 }
-GTTS_LANG = {"en": "en", "ru": "ru"}
+GTTS_LANG = {"en": "en", "ja": "ja", "ru": "ru"}
 
 # ── ASS header — news lower-third style ──────────────────────────────────────
 ASS_HEADER = """\
@@ -40,12 +42,14 @@ Timer: 100.0000
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,DejaVu Sans,62,&H00FFFFFF,&H000000FF,&H00000000,&HCC000000,-1,0,0,0,100,100,1,0,3,0,0,2,80,80,90,1
+Style: Default,Noto Sans CJK JP,56,&H00FFFFFF,&H000000FF,&H00000000,&HCC000000,-1,0,0,0,100,100,1,0,3,0,0,2,80,80,90,1
+Style: English,DejaVu Sans,62,&H00FFFFFF,&H000000FF,&H00000000,&HCC000000,-1,0,0,0,100,100,1,0,3,0,0,2,80,80,90,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 # BorderStyle 3 = filled box background, Alignment 2 = bottom-centre
+# Noto Sans CJK JP handles Japanese kanji/kana characters correctly
 
 
 def _ass_time(t: float) -> str:
@@ -208,7 +212,7 @@ def _azure_backend(text: str, lang: str, mp3_path: str, ass_path: str) -> bool:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def generate_tts(text: str, lang: str = "ru", output_dir: str = "output") -> dict:
+def generate_tts(text: str, lang: str = "ja", output_dir: str = "output") -> dict:
     os.makedirs(output_dir, exist_ok=True)
     mp3_path = os.path.join(output_dir, "voiceover.mp3")
     ass_path = os.path.join(output_dir, "captions.ass")

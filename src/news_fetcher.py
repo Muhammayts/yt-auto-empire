@@ -1,24 +1,23 @@
 """
-Auto News Fetcher — fetches real breaking news from free RSS feeds,
-avoids repeating the same story, generates a 850+ word script (~6-7 min),
-and writes jobs/current_job.json.
+Japan Viral News Fetcher — fetches trending/viral content from Japan,
+generates a 850+ word Japanese-language script, and writes
+jobs/current_job.json.
 
-Key improvements:
-  - Deduplication: tracks used story hashes in jobs/seen_stories.json
-    to avoid repeating the same story across runs
-  - 850+ word scripts enforced with a word-count padder
-  - Longer static sections that don't collapse when RSS summaries are thin
-  - 8 RSS feeds for more variety
+Sources (all free, no API key):
+  - NHK World (English → translate to Japanese)
+  - Japan Times
+  - Sora News 24  (viral Japan news)
+  - Anime News Network
+  - The Mainichi
+  - Kyodo News via RSS
+  - Kotaku (gaming/pop culture)
+  - RocketNews24
+
+Deduplication: tracks used stories in jobs/seen_stories.json
+Script target: 850+ words → ~6-7 min video at ~120 wpm Japanese TTS
 """
 
-import json
-import os
-import re
-import sys
-import time
-import hashlib
-import datetime
-import feedparser
+import json, os, re, sys, time, hashlib, datetime, feedparser
 
 try:
     from deep_translator import GoogleTranslator
@@ -29,42 +28,43 @@ except ImportError:
 
 # ── RSS Feeds ─────────────────────────────────────────────────────────────────
 RSS_FEEDS = [
-    ("Reuters World",  "https://feeds.reuters.com/reuters/worldNews"),
-    ("Reuters Top",    "https://feeds.reuters.com/reuters/topNews"),
-    ("BBC World",      "https://feeds.bbci.co.uk/news/world/rss.xml"),
-    ("BBC Russia",     "https://feeds.bbci.co.uk/russian/rss.xml"),
-    ("AlJazeera",      "https://www.aljazeera.com/xml/rss/all.xml"),
-    ("AP World",       "https://rsshub.app/apnews/topics/world-news"),
-    ("RFERL",          "https://www.rferl.org/api/zquynqquzy"),
-    ("Euronews",       "https://feeds.feedburner.com/euronews/en/home/"),
+    ("NHK World",      "https://www3.nhk.or.jp/rss/news/cat0.xml"),
+    ("Japan Times",    "https://www.japantimes.co.jp/feed/"),
+    ("Sora News 24",   "https://soranews24.com/feed/"),
+    ("The Mainichi",   "https://mainichi.jp/rss/etc/english.rss"),
+    ("Anime News",     "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us"),
+    ("Kotaku",         "https://kotaku.com/rss"),
+    ("RocketNews24",   "https://en.rocketnews24.com/feed/"),
+    ("Reuters Asia",   "https://feeds.reuters.com/reuters/asiaPacificNews"),
 ]
 
+# Keywords that make a story relevant to our channel
 PRIORITY_KEYWORDS = [
-    "russia", "ukraine", "putin", "zelensky", "kremlin", "moscow",
-    "nato", "war", "military", "offensive", "sanctions", "frontline",
-    "missile", "attack", "ceasefire", "negotiations", "eurasian",
-    "belarus", "moldova", "georgia", "caucasus", "central asia",
-    "china", "xi jinping", "nuclear", "energy", "oil", "gas",
-    "kyiv", "dnipro", "kharkiv", "zaporizhzhia", "donetsk",
-    "armed forces", "troops", "casualties", "drone", "strike",
+    "japan", "japanese", "tokyo", "osaka", "kyoto", "anime", "manga",
+    "nintendo", "sony", "toyota", "honda", "fujitsu", "softbank",
+    "akihabara", "harajuku", "shibuya", "idol", "j-pop", "jpop",
+    "ramen", "sushi", "kawaii", "otaku", "cosplay", "samurai",
+    "earthquake", "typhoon", "fujisan", "sumo", "baseball",
+    "trending", "viral", "popular", "new", "record", "first",
+    "technology", "robot", "ai", "gaming", "game", "stream",
+    "prime minister", "election", "economy", "yen", "nikkei",
 ]
 
 HOT_KEYWORDS = [
-    "breaking", "urgent", "attack", "explosion", "killed", "strike",
-    "ceasefire", "missile", "nuclear", "invasion", "offensive", "emergency",
+    "breaking", "viral", "trending", "record", "first ever", "shocking",
+    "incredible", "amazing", "new release", "announced", "revealed",
+    "major", "historic", "landmark", "worldwide", "global",
 ]
 
-HEADERS = {"User-Agent": "EurasiaBreaking RSS Reader/1.0"}
+HEADERS      = {"User-Agent": "JapanViral/1.0 RSS Reader"}
 HISTORY_FILE = "jobs/seen_stories.json"
-HISTORY_HOURS = 36   # skip a story seen less than 36 h ago
+HISTORY_HOURS = 36
 
 
-# ── Story deduplication history ───────────────────────────────────────────────
+# ── Deduplication ─────────────────────────────────────────────────────────────
 
 def _story_hash(title: str) -> str:
-    normalized = re.sub(r'\W+', ' ', title.lower()).strip()
-    return hashlib.md5(normalized.encode()).hexdigest()[:12]
-
+    return hashlib.md5(re.sub(r'\W+', ' ', title.lower()).strip().encode()).hexdigest()[:12]
 
 def _load_history() -> dict:
     if os.path.exists(HISTORY_FILE):
@@ -75,363 +75,296 @@ def _load_history() -> dict:
             pass
     return {}
 
-
 def _save_history(history: dict, new_hash: str, title: str):
-    # Prune entries older than 7 days
     cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).isoformat()
-    history = {k: v for k, v in history.items() if v.get("seen_at", "") > cutoff}
-    history[new_hash] = {
-        "title": title,
-        "seen_at": datetime.datetime.utcnow().isoformat() + "Z",
-    }
+    history = {k: v for k, v in history.items() if v.get("seen_at","") > cutoff}
+    history[new_hash] = {"title": title, "seen_at": datetime.datetime.utcnow().isoformat()+"Z"}
     os.makedirs(os.path.dirname(HISTORY_FILE) or ".", exist_ok=True)
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
-
-def _was_recently_used(story_hash: str, history: dict) -> bool:
-    if story_hash not in history:
+def _was_recently_used(h: str, history: dict) -> bool:
+    if h not in history:
         return False
-    seen_at_str = history[story_hash].get("seen_at", "")
     try:
-        seen_at = datetime.datetime.fromisoformat(seen_at_str.rstrip("Z"))
-        hours_ago = (datetime.datetime.utcnow() - seen_at).total_seconds() / 3600
-        return hours_ago < HISTORY_HOURS
+        seen = datetime.datetime.fromisoformat(history[h]["seen_at"].rstrip("Z"))
+        return (datetime.datetime.utcnow() - seen).total_seconds() / 3600 < HISTORY_HOURS
     except Exception:
         return False
 
 
-# ── Fetch and score articles ──────────────────────────────────────────────────
+# ── Fetch & Score ─────────────────────────────────────────────────────────────
 
 def _fetch_feed(source: str, url: str) -> list:
     try:
         feed = feedparser.parse(url)
-        articles = []
-        for entry in feed.entries[:25]:
-            title   = entry.get("title", "").strip()
-            # Try multiple content fields — some feeds are richer
-            summary = (
-                entry.get("content", [{}])[0].get("value", "")
-                or entry.get("summary", "")
-                or entry.get("description", "")
-            ).strip()
+        arts = []
+        for e in feed.entries[:25]:
+            title   = e.get("title","").strip()
+            summary = (e.get("content",[{}])[0].get("value","")
+                       or e.get("summary","") or e.get("description","")).strip()
             summary = re.sub(r'<[^>]+>', ' ', summary)
             summary = re.sub(r'\s+', ' ', summary).strip()
-            link    = entry.get("link", "")
-            pub     = entry.get("published", "")
-            if title and len(title) > 10:
-                articles.append({
-                    "source": source,
-                    "title":   title,
-                    "summary": summary[:2000],
-                    "link":    link,
-                    "published": pub,
-                })
-        print(f"[NEWS] {source}: {len(articles)} articles")
-        return articles
+            if title and len(title) > 8:
+                arts.append({"source": source, "title": title,
+                             "summary": summary[:2000], "link": e.get("link","")})
+        print(f"[NEWS] {source}: {len(arts)} articles")
+        return arts
     except Exception as e:
-        print(f"[NEWS] Failed to fetch {source}: {e}")
+        print(f"[NEWS] Failed {source}: {e}")
         return []
-
 
 def _score(article: dict, all_articles: list) -> float:
     text  = (article["title"] + " " + article["summary"]).lower()
-    score = 0.0
-    for kw in PRIORITY_KEYWORDS:
-        if kw in text:
-            score += 10
-    for kw in HOT_KEYWORDS:
-        if kw in text:
-            score += 15
+    score = sum(10 for kw in PRIORITY_KEYWORDS if kw in text)
+    score += sum(15 for kw in HOT_KEYWORDS if kw in text)
     score += min(len(article["summary"]) // 60, 15)
-    # Trending bonus: same story covered by multiple sources
     my_words = set(re.findall(r'\b[a-z]{5,}\b', article["title"].lower()))
     for other in all_articles:
-        if other is article:
-            continue
-        other_words = set(re.findall(r'\b[a-z]{5,}\b', other["title"].lower()))
-        if len(my_words & other_words) >= 2:
-            score += 12
+        if other is not article:
+            other_words = set(re.findall(r'\b[a-z]{5,}\b', other["title"].lower()))
+            if len(my_words & other_words) >= 2:
+                score += 12
     return min(score, 300)
 
-
 def fetch_top_stories(history: dict) -> list:
-    """
-    Fetch all feeds, deduplicate by title, skip recently used stories,
-    return a list of related articles led by the hottest unseen story.
-    """
     all_articles = []
     for source, url in RSS_FEEDS:
-        arts = _fetch_feed(source, url)
-        all_articles.extend(arts)
-        if arts:
-            time.sleep(0.4)
+        all_articles.extend(_fetch_feed(source, url))
+        time.sleep(0.3)
 
     if not all_articles:
-        raise RuntimeError("No articles fetched from any RSS feed")
+        raise RuntimeError("No articles fetched")
 
-    # Deduplicate by title similarity
-    seen_title_words: list = []
-    unique: list = []
+    # Deduplicate
+    seen_words, unique = [], []
     for art in all_articles:
         words = set(re.findall(r'\b[a-z]{5,}\b', art["title"].lower()))
-        if any(len(words & sw) >= 3 for sw in seen_title_words):
+        if any(len(words & sw) >= 3 for sw in seen_words):
             continue
-        seen_title_words.append(words)
+        seen_words.append(words)
         unique.append(art)
 
-    # Sort by score
     scored = sorted(unique, key=lambda a: _score(a, all_articles), reverse=True)
 
-    # Pick top unseen story
-    primary = None
-    for art in scored:
-        h = _story_hash(art["title"])
-        if not _was_recently_used(h, history):
-            primary = art
-            break
+    # Pick freshest unseen story
+    primary = next((a for a in scored if not _was_recently_used(_story_hash(a["title"]), history)),
+                   scored[0])
 
-    if primary is None:
-        print("[NEWS] ⚠️  All top stories seen recently — using most recent anyway")
-        primary = scored[0]
+    # Related articles
+    p_words  = set(re.findall(r'\b[a-z]{5,}\b', primary["title"].lower()))
+    related  = [a for a in scored if a is not primary
+                and (len(p_words & set(re.findall(r'\b[a-z]{5,}\b', a["title"].lower()))) >= 1
+                     or _score(a, all_articles) > 40)][:6]
 
-    # Gather related articles (different from primary but same topic)
-    primary_words = set(re.findall(r'\b[a-z]{5,}\b', primary["title"].lower()))
-    related = []
-    for art in scored:
-        if art is primary:
-            continue
-        art_words = set(re.findall(r'\b[a-z]{5,}\b', art["title"].lower()))
-        # Include if somewhat related OR just more general Eurasia news
-        if len(primary_words & art_words) >= 1 or _score(art, all_articles) > 50:
-            related.append(art)
-        if len(related) >= 6:
-            break
-
-    result = [primary] + related
-    for a in result[:3]:
-        print(f"[NEWS] Selected [{a['source']}]: {a['title'][:70]}")
-    return result
+    for a in [primary] + related[:2]:
+        print(f"[NEWS] [{a['source']}] {a['title'][:70]}")
+    return [primary] + related
 
 
-# ── Script builder (enforces 850+ words) ─────────────────────────────────────
+# ── Script builder ────────────────────────────────────────────────────────────
 
-def _sentences(text: str, max_n: int = 10) -> list:
+def _sents(text: str, n: int = 8) -> list:
     text = re.sub(r'\s+', ' ', text).strip()
-    sents = re.split(r'(?<=[.!?])\s+', text)
-    return [s.strip() for s in sents if len(s.strip()) > 20][:max_n]
-
+    return [s.strip() for s in re.split(r'(?<=[.!?])\s+', text) if len(s.strip()) > 20][:n]
 
 def _build_long_english_script(articles: list) -> str:
-    primary  = articles[0]
-    related  = articles[1:]
-    title    = primary["title"].rstrip(".!?")
-    source   = primary["source"]
-    date     = datetime.datetime.utcnow().strftime("%B %d, %Y")
-    year     = datetime.datetime.utcnow().year
+    primary = articles[0]
+    related = articles[1:]
+    title   = primary["title"].rstrip(".!?")
+    source  = primary["source"]
+    date    = datetime.datetime.utcnow().strftime("%B %d, %Y")
 
-    p = _sentences(primary["summary"], 10)
+    p = _sents(primary["summary"], 10)
     r = []
     for a in related[:4]:
-        r.extend(_sentences(a["summary"], 4))
+        r.extend(_sents(a["summary"], 4))
+
+    def pick(lst, i, fb=""): return lst[i] if i < len(lst) else fb
 
     all_text = (title + " " + primary["summary"]).lower()
-    is_war      = any(w in all_text for w in ["ukraine","frontline","troops","attack","military","drone"])
-    is_diplo    = any(w in all_text for w in ["negotiation","ceasefire","talks","summit","diplomatic"])
-    is_sanction = any(w in all_text for w in ["sanction","economic","trade","energy","oil","gas"])
-    is_nuclear  = any(w in all_text for w in ["nuclear","atomic","warhead","missile"])
-    is_energy   = any(w in all_text for w in ["power plant","pipeline","energy","electricity","gas"])
+    is_anime  = any(w in all_text for w in ["anime","manga","otaku","cosplay","studio"])
+    is_tech   = any(w in all_text for w in ["nintendo","sony","game","robot","ai","technology","app"])
+    is_food   = any(w in all_text for w in ["ramen","sushi","food","restaurant","recipe","eat"])
+    is_celeb  = any(w in all_text for w in ["idol","jpop","j-pop","singer","actor","actress","celebrity"])
+    is_news   = any(w in all_text for w in ["earthquake","typhoon","election","minister","economy","yen"])
 
-    def pick(lst, idx, fallback=""):
-        return lst[idx] if idx < len(lst) else fallback
-
-    # ── SECTION 1: Breaking Hook  (~80 words) ────────────────────────────────
+    # S1: Hook (~80 w)
     s1 = (
-        f"Breaking news alert from Eurasia. {title}. "
-        f"{pick(p, 0, f'This story is developing rapidly and new details are emerging by the hour.')} "
-        f"Eurasia Breaking is tracking this story in real time, monitoring all official channels, "
-        f"regional correspondents, and international wire services. "
-        f"Here is everything we know at this hour."
+        f"Hello everyone, and welcome back to Japan Viral. "
+        f"Today we are covering a story that is trending all across Japan right now. "
+        f"{title}. "
+        f"{pick(p,0,'This story is spreading rapidly across Japanese social media and news outlets.')} "
+        f"Stay with us as we break down everything you need to know about this developing story."
     )
 
-    # ── SECTION 2: What Happened  (~130 words) ────────────────────────────────
-    details_raw = " ".join(filter(None, [pick(p,1), pick(p,2), pick(p,3)]))
-    if len(details_raw.split()) < 20:
-        details_raw = f"Reports from the region indicate that {title.lower()}, with the full scope of the event still becoming clear."
+    # S2: What's happening (~130 w)
+    det = " ".join(filter(None,[pick(p,1),pick(p,2),pick(p,3)]))
+    if len(det.split()) < 20:
+        det = f"Reports from {source} and other Japanese media confirm that {title.lower()}."
     s2 = (
-        f"Let us walk through exactly what happened. "
-        f"{details_raw} "
-        f"Multiple sources including {source} have confirmed the core elements of this report. "
-        f"Regional authorities have been placed on high alert, and emergency protocols have been activated in affected areas. "
-        f"Independent verification of some claims is still ongoing as access to the region remains limited for international journalists."
+        f"So what exactly is going on? Here are the full details. "
+        f"{det} "
+        f"This story first came to light when {source} reported on the development, "
+        f"and it quickly spread across Japanese social media platforms including Twitter Japan, "
+        f"Instagram, and YouTube, where it became one of the top trending topics of the day. "
+        f"Reactions from the Japanese public have been strong and mixed."
     )
 
-    # ── SECTION 3: Latest Developments  (~120 words) ──────────────────────────
-    latest_raw = " ".join(filter(None, [pick(p,4), pick(p,5), pick(r,0)]))
-    if len(latest_raw.split()) < 15:
-        latest_raw = f"The situation on the ground continues to evolve, with new information arriving from multiple directions."
+    # S3: Latest updates (~110 w)
+    latest = " ".join(filter(None,[pick(p,4),pick(p,5),pick(r,0)]))
+    if len(latest.split()) < 15:
+        latest = "The story continues to develop with new information emerging throughout the day."
     s3 = (
-        f"Here are the latest developments as of this report. "
-        f"{latest_raw} "
-        f"Satellite imagery analyzed by open-source intelligence researchers shows significant activity in the region. "
-        f"Social media channels from local residents are corroborating the broad outlines of official reports, "
-        f"though some details remain impossible to independently confirm at this stage."
+        f"Here are the latest updates as of {date}. "
+        f"{latest} "
+        f"Japanese netizens have been responding in huge numbers online, "
+        f"with the story generating hundreds of thousands of views and shares in just a few hours. "
+        f"Multiple major Japanese news outlets have now picked up the story, "
+        f"confirming its importance and relevance to everyday life in Japan."
     )
 
-    # ── SECTION 4: International Reaction  (~140 words) ───────────────────────
-    reaction_detail = " ".join(filter(None, [pick(r,1), pick(r,2)]))
+    # S4: Why it matters / reaction (~140 w)
+    react = " ".join(filter(None,[pick(r,1),pick(r,2)]))
     s4 = (
-        f"The international community has responded quickly to these developments. "
-        f"{reaction_detail} "
-        f"The United States National Security Council convened an emergency meeting, "
-        f"with a spokesperson stating that Washington is monitoring the situation closely and stands ready to respond. "
-        f"The European Union's foreign policy chief issued a statement calling for maximum restraint "
-        f"and urging all parties to pursue dialogue over confrontation. "
-        f"NATO's Secretary General said the alliance is in close contact with affected member states "
-        f"and that consultations are ongoing. "
-        f"China's foreign ministry called for calm and said Beijing supports a negotiated resolution."
+        f"Why is this story resonating so strongly with people in Japan? "
+        f"{react} "
+        f"Japanese social media users have been sharing their thoughts widely. "
+        f"Many expressed excitement and surprise, with some calling it one of the most "
+        f"significant developments in this area in recent memory. "
+        f"Others noted the broader implications for Japanese society and culture. "
+        f"Industry experts and commentators have also weighed in, "
+        f"with most agreeing that this represents a meaningful shift worth paying close attention to."
     )
 
-    # ── SECTION 5: Regional / Strategic Context  (~150 words) ─────────────────
-    if is_nuclear:
+    # S5: Deep context — topic-aware (~150 w)
+    if is_anime:
         s5 = (
-            f"To place this in proper context, we must consider the nuclear dimension. "
-            f"Russia maintains the world's largest nuclear arsenal, with an estimated six thousand warheads. "
-            f"Any movement or rhetoric involving strategic assets triggers immediate responses from "
-            f"Western intelligence agencies and nuclear command structures. "
-            f"The United States and its allies maintain continuous monitoring of Russian nuclear forces "
-            f"through a combination of satellite surveillance, signals intelligence, and human sources. "
-            f"Analysts note that while nuclear rhetoric has intensified since the start of the conflict, "
-            f"the actual risk of use remains low — but not zero. "
-            f"Former NATO commanders have stated publicly that any use of nuclear weapons, even tactical ones, "
-            f"would fundamentally transform the nature of the conflict and trigger an overwhelming response."
+            f"To understand why this matters so much in Japan, we need to look at the broader anime and manga landscape. "
+            f"Japan's animation industry generates over two trillion yen annually and employs hundreds of thousands of people. "
+            f"Anime is no longer just a Japanese cultural product — it is a global phenomenon, "
+            f"with streaming platforms like Netflix, Crunchyroll, and Amazon Prime competing fiercely for rights. "
+            f"The global anime market has grown by over fifty percent in the last five years alone. "
+            f"What happens in Japan's anime industry often sets trends that ripple across entertainment worldwide. "
+            f"This latest development is a perfect example of how the industry continues to evolve and surprise fans."
         )
-    elif is_war:
+    elif is_tech:
         s5 = (
-            f"To understand the full picture, we need to look at the broader military situation. "
-            f"The conflict has now entered what analysts describe as a critical attritional phase, "
-            f"with neither side able to achieve the rapid breakthroughs seen in earlier stages of the war. "
-            f"Ukraine's armed forces, supplied with Western weapons including artillery, armored vehicles, "
-            f"and long-range precision systems, have demonstrated a capacity to strike deep into Russian-held territory. "
-            f"Russia, meanwhile, has adapted its tactics to emphasize drone warfare, glide bombs, "
-            f"and mass missile strikes against Ukrainian infrastructure, particularly power generation facilities. "
-            f"The humanitarian cost continues to mount, with the United Nations estimating that over ten million "
-            f"Ukrainians remain displaced, either internally or as refugees in neighboring countries."
+            f"Japan has always been at the cutting edge of technology, and this story is no exception. "
+            f"From the invention of the walkman to the creation of the world's fastest bullet trains, "
+            f"Japan has consistently led the world in technological innovation. "
+            f"Today, Japanese companies like Sony, Nintendo, Toyota, and SoftBank continue to shape "
+            f"how the world interacts with technology. "
+            f"The gaming industry alone, dominated by Japanese giants, generates billions of dollars globally each year. "
+            f"Robotics and artificial intelligence are also areas where Japan holds a commanding position, "
+            f"with the country investing heavily in automation to address its aging population challenge."
         )
-    elif is_energy:
+    elif is_food:
         s5 = (
-            f"The energy dimension of this conflict deserves careful attention. "
-            f"Ukraine's power infrastructure has been a systematic target since the autumn of two thousand twenty-two, "
-            f"with Russian strikes destroying or damaging a significant portion of the country's generating capacity. "
-            f"The result has been rolling blackouts affecting millions of civilians, particularly during winter months. "
-            f"European nations have accelerated their transition away from Russian energy, "
-            f"with pipeline gas imports from Russia to Europe falling from over forty percent of supply "
-            f"to under ten percent since the start of the conflict. "
-            f"This energy decoupling, while painful economically in the short term, "
-            f"has permanently altered the geopolitical leverage Russia once held over Europe."
+            f"Japanese food culture is one of the most admired in the entire world, "
+            f"and it continues to evolve in exciting ways. "
+            f"Japan has more Michelin-starred restaurants than any other country on earth, "
+            f"with Tokyo alone holding over two hundred stars — more than Paris and New York combined. "
+            f"But Japanese food culture is not just about fine dining. "
+            f"It is about the craftsmanship and dedication to quality that goes into every bowl of ramen, "
+            f"every piece of sushi, and every cup of matcha. "
+            f"Food trends that start in Japan regularly spread worldwide, "
+            f"making this story especially interesting for food lovers everywhere."
         )
-    elif is_diplo:
+    elif is_celeb:
         s5 = (
-            f"The diplomatic landscape surrounding this conflict is exceptionally complex. "
-            f"Multiple tracks of negotiation have been attempted since the start of full-scale hostilities, "
-            f"including direct contacts facilitated by Turkey, indirect channels through third countries, "
-            f"and broader multilateral frameworks involving the United Nations. "
-            f"The fundamental obstacles to a negotiated settlement remain the same: "
-            f"Ukraine insists on the full restoration of its internationally recognized borders, "
-            f"including Crimea, while Russia demands recognition of its territorial gains and "
-            f"binding guarantees that Ukraine will not join NATO. "
-            f"These positions remain irreconcilable at present, though back-channel contacts continue."
+            f"Japanese pop culture and entertainment have an enormous global footprint. "
+            f"J-pop and idol culture have millions of dedicated fans not just in Japan "
+            f"but across Asia, Europe, and North America. "
+            f"Groups like AKB48 and artists managed by major agencies continue to dominate charts "
+            f"and fill arenas around the world. "
+            f"The idol industry in Japan is a multi-billion yen business built on fan devotion, "
+            f"meticulously crafted public images, and an almost unparalleled level of engagement between "
+            f"artists and their communities. "
+            f"When something happens in this world, millions of fans worldwide pay close attention."
         )
     else:
         s5 = (
-            f"The wider geopolitical context is essential for understanding why this matters. "
-            f"Russia's strategic posture has undergone a fundamental transformation since February twenty twenty-two. "
-            f"The country is now operating under the most extensive package of Western sanctions in history, "
-            f"with restrictions on its financial system, technology imports, and energy exports. "
-            f"Despite these pressures, the Russian economy has shown unexpected resilience, "
-            f"partly by redirecting trade toward China, India, and other non-Western markets. "
-            f"The conflict has also accelerated changes in European security architecture, "
-            f"with Finland and Sweden joining NATO and defence spending rising sharply across the continent. "
-            f"These structural changes will shape European security for a generation."
+            f"To put this in context, Japan is one of the world's most fascinating and unique societies. "
+            f"With a population of about one hundred twenty-five million people, "
+            f"Japan is the world's third-largest economy and home to some of humanity's most distinctive culture, "
+            f"from ancient samurai traditions to cutting-edge robotics. "
+            f"Japanese society balances a deep reverence for tradition with an enthusiastic embrace of innovation. "
+            f"This combination makes Japan a constant source of interesting and surprising stories "
+            f"that capture global attention and inspire people around the world. "
+            f"Understanding what trends in Japan today often tells us something important about where the world is headed tomorrow."
         )
 
-    # ── SECTION 6: Background  (~130 words) ───────────────────────────────────
+    # S6: Background & history (~120 w)
     s6 = (
-        f"For viewers new to this story, here is the essential background. "
-        f"Russia launched a full-scale military invasion of Ukraine on February twenty-fourth, twenty twenty-two, "
-        f"following eight years of lower-level conflict in eastern Ukraine that began with Russia's annexation of Crimea in twenty fourteen. "
-        f"The invasion triggered the largest ground war in Europe since the Second World War "
-        f"and provoked an unprecedented Western response including military aid to Ukraine, "
-        f"sweeping economic sanctions against Russia, and the near-total isolation of Russia from Western financial markets. "
-        f"{pick(r,3,'The conflict has reshaped global alliances, energy markets, and the international rules-based order in ways that will take years to fully understand.')} "
-        f"The human cost has been staggering, with casualties estimated in the hundreds of thousands on both sides."
+        f"Let us also look at some important background information for context. "
+        f"{pick(r,3,'Japan continues to be one of the most culturally influential nations in the world.')} "
+        f"Japan has undergone remarkable transformations over the past century — "
+        f"from the Meiji Restoration that opened the country to the world in the eighteen hundreds, "
+        f"to the post-war economic miracle that turned Japan into a global powerhouse in just a few decades. "
+        f"Today's Japan is a country navigating major challenges including an aging population, "
+        f"economic pressures, and shifting cultural values, while simultaneously exporting its unique culture "
+        f"and products to an eager global audience."
     )
 
-    # ── SECTION 7: Analysis  (~100 words) ─────────────────────────────────────
-    extra = " ".join(filter(None, [pick(p,6), pick(p,7), pick(r,4)]))
+    # S7: Extra detail + analysis (~100 w)
+    extra = " ".join(filter(None,[pick(p,6),pick(p,7),pick(r,4)]))
     s7 = (
-        f"What does this latest development mean going forward? "
+        f"Diving deeper into this story, there is more worth noting. "
         f"{extra if len(extra.split()) > 15 else ''} "
-        f"Military and strategic analysts watching the situation say the next seventy-two hours will be decisive. "
-        f"If the situation escalates, we could see a significant shift in the operational picture. "
-        f"If it stabilizes, it may represent yet another tactical adjustment in a conflict "
-        f"that has already surprised observers many times over."
+        f"Analysts who follow Japanese trends closely say this kind of development is a sign "
+        f"of how rapidly things can change and evolve in Japan. "
+        f"What begins as a niche story can quickly become a nationwide conversation, "
+        f"reflecting the unique speed at which information travels in Japan's hyper-connected society."
     ).strip()
 
-    # ── SECTION 8: Closing CTA  (~80 words) ───────────────────────────────────
+    # S8: Closing CTA (~80 w)
     s8 = (
-        f"This is Eurasia Breaking, your source for continuous coverage of breaking news from Russia, Ukraine, and the entire Eurasian region. "
-        f"We will continue updating this story throughout the day as new information becomes available. "
-        f"If you found this report valuable, please subscribe to our channel and hit the notification bell "
-        f"so you never miss a breaking update. "
-        f"Like this video to help us reach more viewers who need accurate, timely information about this critical region. "
-        f"Stay informed. Stay safe."
+        f"That is everything we have on this story for now. "
+        f"Japan Viral covers the most interesting, trending, and viral stories from Japan every single day. "
+        f"If you enjoyed this video, please give it a like — it really helps our channel grow. "
+        f"Hit the subscribe button and turn on the notification bell "
+        f"so you never miss our daily updates from Japan. "
+        f"We will see you in the next video. Arigatou gozaimashita!"
     )
 
-    full = " ".join([s1, s2, s3, s4, s5, s6, s7, s8])
-    full = re.sub(r'\s{2,}', ' ', full).strip()
+    full = re.sub(r'\s{2,}', ' ', " ".join([s1,s2,s3,s4,s5,s6,s7,s8])).strip()
 
-    # ── Enforce 850-word minimum ───────────────────────────────────────────────
-    words = full.split()
-    if len(words) < 850:
-        padding = (
-            f" The situation in Ukraine and Russia continues to be one of the most closely watched "
-            f"geopolitical crises of the twenty-first century. World leaders, military commanders, and "
-            f"ordinary citizens across Europe and beyond are following developments with deep anxiety and hope. "
-            f"The decisions made in the coming days and weeks will have consequences that extend far beyond "
-            f"the borders of Ukraine and Russia, touching on the future of European security, "
-            f"the global economic order, and the fundamental principles of international law. "
-            f"Eurasia Breaking remains committed to bringing you accurate, fact-based reporting "
-            f"without sensationalism, so that you can form your own informed view of these events."
+    # Enforce 850-word minimum
+    if len(full.split()) < 850:
+        full += (
+            " Japan's influence on global pop culture, technology, and lifestyle continues to grow every year. "
+            "From the latest anime releases to groundbreaking robotics, from viral food trends to iconic fashion, "
+            "Japan never stops surprising and inspiring the rest of the world. "
+            "At Japan Viral we are dedicated to bringing you the most exciting and relevant stories "
+            "from this remarkable country, delivered fresh every single day. "
+            "Thank you so much for watching and for being part of our growing community of Japan enthusiasts."
         )
-        full = full + padding
         full = re.sub(r'\s{2,}', ' ', full).strip()
 
-    final_count = len(full.split())
-    print(f"[NEWS] Script: {final_count} words  (~{final_count//130:.1f} min at 130 wpm)")
+    wc = len(full.split())
+    print(f"[NEWS] Script: {wc} words (~{wc//120:.1f} min at 120 wpm)")
     return full
 
 
-# ── Translation ───────────────────────────────────────────────────────────────
+# ── Translation to Japanese ───────────────────────────────────────────────────
 
-def _translate_to_russian(text: str) -> str:
+def _translate_to_japanese(text: str) -> str:
     if not TRANSLATE_AVAILABLE:
         return text
     max_chunk = 3500
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sents = re.split(r'(?<=[.!?])\s+', text)
     chunks, cur = [], ""
-    for s in sentences:
+    for s in sents:
         if len(cur) + len(s) < max_chunk:
             cur += (" " if cur else "") + s
         else:
-            if cur:
-                chunks.append(cur)
+            if cur: chunks.append(cur)
             cur = s
-    if cur:
-        chunks.append(cur)
+    if cur: chunks.append(cur)
 
     parts = []
-    translator = GoogleTranslator(source="en", target="ru")
+    translator = GoogleTranslator(source="en", target="ja")
     for i, chunk in enumerate(chunks):
         for attempt in range(3):
             try:
@@ -441,17 +374,15 @@ def _translate_to_russian(text: str) -> str:
                 break
             except Exception as e:
                 print(f"[NEWS] Translation {attempt+1} failed: {e}")
-                time.sleep(2 * (attempt + 1))
+                time.sleep(2*(attempt+1))
         else:
             parts.append(chunk)
     return " ".join(parts)
 
-
-def _translate_title(title: str) -> str:
-    if not TRANSLATE_AVAILABLE:
-        return title
+def _translate_title(title: str, target: str = "ja") -> str:
+    if not TRANSLATE_AVAILABLE: return title
     try:
-        return GoogleTranslator(source="en", target="ru").translate(title)
+        return GoogleTranslator(source="en", target=target).translate(title)
     except Exception:
         return title
 
@@ -459,24 +390,24 @@ def _translate_title(title: str) -> str:
 # ── SEO Tags & Description ────────────────────────────────────────────────────
 
 def _extract_seo_tags(articles: list) -> list:
-    all_text = " ".join((a["title"] + " " + a["summary"]).lower() for a in articles)
-    base = ["EurasiaBreaking","Russia","breaking news","world news","новости","РоссияНовости","Eurasia"]
+    all_text = " ".join((a["title"]+" "+a["summary"]).lower() for a in articles)
+    base = ["JapanViral","Japan","日本","viral","trending","バイラル","トレンド","日本のニュース"]
     kw_map = {
-        "ukraine":   ["Ukraine","Украина","Ukraine war","RussiaUkraine"],
-        "nato":      ["NATO","НАТО","NATO news"],
-        "putin":     ["Putin","Путин","Putin news"],
-        "zelensky":  ["Zelensky","Зеленский"],
-        "military":  ["military","armed forces","война"],
-        "sanctions": ["sanctions","санкции","Russia sanctions"],
-        "nuclear":   ["nuclear","ядерный","nuclear threat"],
-        "energy":    ["energy crisis","энергетика","oil price"],
-        "china":     ["China","Китай","China Russia"],
-        "ceasefire": ["ceasefire","перемирие","peace talks"],
-        "attack":    ["attack","strike","удары"],
-        "missile":   ["missile","ракетный удар"],
-        "frontline": ["frontline","линия фронта"],
-        "drone":     ["drone","дрон","FPV drone"],
-        "kyiv":      ["Kyiv","Киев"],
+        "anime":     ["anime","アニメ","manga","マンガ"],
+        "nintendo":  ["Nintendo","任天堂","gaming","ゲーム"],
+        "sony":      ["Sony","ソニー","technology","テクノロジー"],
+        "ramen":     ["ramen","ラーメン","Japanese food","日本食"],
+        "sushi":     ["sushi","寿司","Japanese cuisine"],
+        "idol":      ["jpop","J-POP","idol","アイドル"],
+        "tokyo":     ["Tokyo","東京","Japan travel"],
+        "earthquake":["earthquake","地震","Japan disaster"],
+        "typhoon":   ["typhoon","台風","Japan weather"],
+        "robot":     ["robot","ロボット","Japan AI","人工知能"],
+        "kawaii":    ["kawaii","かわいい","Japanese culture","日本文化"],
+        "game":      ["game","ゲーム","esports","gaming news"],
+        "cosplay":   ["cosplay","コスプレ","otaku","オタク"],
+        "sumo":      ["sumo","相撲","Japanese sports"],
+        "toyota":    ["Toyota","トヨタ","Japan business","日本経済"],
     }
     extra = []
     for kw, tags in kw_map.items():
@@ -484,54 +415,52 @@ def _extract_seo_tags(articles: list) -> list:
             extra.extend(tags[:2])
     return list(dict.fromkeys(base + extra))[:15]
 
-
 def _build_seo_description(articles: list, en_title: str, lang: str) -> str:
     source = articles[0]["source"]
-    date   = datetime.datetime.utcnow().strftime("%B %d, %Y")
-    if lang == "ru":
+    date   = datetime.datetime.utcnow().strftime("%Y年%m月%d日") if lang == "ja" \
+             else datetime.datetime.utcnow().strftime("%B %d, %Y")
+    if lang == "ja":
         return (
-            f"🔴 СРОЧНО | {en_title} | Россия и Украина — {date}\n\n"
-            f"📌 Содержание:\n"
-            f"00:00 Экстренное сообщение\n"
-            f"00:45 Что произошло\n"
-            f"02:00 Последние события\n"
-            f"03:00 Международная реакция\n"
-            f"04:00 Контекст и стратегический анализ\n"
-            f"05:00 История вопроса\n"
-            f"06:00 Анализ и выводы\n\n"
-            f"📡 Источники: {source} и международные агентства\n"
-            f"🌍 Подписывайтесь для ежедневных обновлений из России, Украины и Евразии.\n\n"
-            f"👉 Подписаться | 🔔 Уведомления | 👍 Лайк\n\n"
-            f"⚠️ Материал предназначен для информационных целей на основе открытых источников.\n\n"
-            f"#EurasiaBreaking #Россия #Украина #СрочноеСообщение #МировыеНовости "
-            f"#EurasiaNews #RussiaUkraine #BreakingNews #WorldNews #Путин #Зеленский "
-            f"#война #НАТО #NATO #новости #Евразия"
+            f"🔥 トレンド | {en_title} | 日本のバイラルニュース — {date}\n\n"
+            f"📌 目次:\n"
+            f"00:00 イントロ・注目のニュース\n"
+            f"00:45 詳細と最新情報\n"
+            f"02:00 SNSの反応\n"
+            f"03:00 なぜ話題になっているのか\n"
+            f"04:00 背景と詳しい解説\n"
+            f"05:00 専門家の分析\n"
+            f"06:00 まとめ・チャンネル登録のお願い\n\n"
+            f"📡 情報源: {source} および日本の主要メディア\n"
+            f"🌍 毎日日本の最新トレンド・バイラルニュースをお届けします！\n\n"
+            f"👉 チャンネル登録 | 🔔 通知オン | 👍 高評価\n\n"
+            f"⚠️ 本動画は公開情報をもとにした情報提供を目的としています。\n\n"
+            f"#JapanViral #日本 #トレンド #バイラル #日本のニュース "
+            f"#アニメ #ゲーム #テクノロジー #日本文化 #東京 "
+            f"#Japan #viral #trending #japanews #anime"
         )
     else:
         return (
-            f"🔴 BREAKING | {en_title} | Live — {date}\n\n"
+            f"🔥 TRENDING | {en_title} | Japan Viral — {date}\n\n"
             f"📌 Chapters:\n"
-            f"00:00 Breaking Alert\n"
-            f"00:45 What Happened\n"
-            f"02:00 Latest Developments\n"
-            f"03:00 International Reaction\n"
-            f"04:00 Strategic Context\n"
-            f"05:00 Background & History\n"
-            f"06:00 Analysis & Outlook\n\n"
-            f"📡 Sources: {source} and international agencies\n"
-            f"🌍 Subscribe for daily updates from Russia, Ukraine & Eurasia.\n\n"
+            f"00:00 Intro & Breaking Story\n"
+            f"00:45 Full Details\n"
+            f"02:00 Social Media Reaction\n"
+            f"03:00 Why It's Trending\n"
+            f"04:00 Background & Context\n"
+            f"05:00 Expert Analysis\n"
+            f"06:00 Wrap-Up & Subscribe\n\n"
+            f"📡 Source: {source} and major Japanese media\n"
+            f"🌍 Daily trending & viral news from Japan!\n\n"
             f"👉 Subscribe | 🔔 Bell | 👍 Like\n\n"
-            f"⚠️ For informational purposes. Sourced from open-access international media.\n\n"
-            f"#EurasiaBreaking #Russia #Ukraine #BreakingNews #WorldNews "
-            f"#RussiaUkraine #Putin #Zelensky #War #NATO #EurasiaNews "
-            f"#Geopolitics #LiveNews #RussianNews #UkraineWar"
+            f"#JapanViral #Japan #trending #viral #japannews "
+            f"#anime #gaming #technology #japanculture #tokyo"
         )
 
 
 # ── Main entry ────────────────────────────────────────────────────────────────
 
-def generate_job(lang: str = "ru", output_path: str = "jobs/current_job.json") -> dict:
-    print(f"\n[NEWS] Fetching fresh trending news (avoiding repeats)...")
+def generate_job(lang: str = "ja", output_path: str = "jobs/current_job.json") -> dict:
+    print(f"\n[NEWS] Fetching fresh trending Japan content...")
     history  = _load_history()
     articles = fetch_top_stories(history)
     primary  = articles[0]
@@ -539,38 +468,37 @@ def generate_job(lang: str = "ru", output_path: str = "jobs/current_job.json") -
     en_script = _build_long_english_script(articles)
     en_title  = primary["title"]
 
-    if lang == "ru":
-        print("[NEWS] Translating to Russian...")
-        script = _translate_to_russian(en_script)
-        title  = "🔴 СРОЧНО: " + _translate_title(en_title)[:72]
+    if lang == "ja":
+        print("[NEWS] Translating to Japanese...")
+        script = _translate_to_japanese(en_script)
+        title  = "🔥 話題: " + _translate_title(en_title, "ja")[:72]
     else:
         script = en_script
-        title  = "🔴 BREAKING: " + en_title[:72]
+        title  = "🔥 TRENDING: " + en_title[:72]
 
     description = _build_seo_description(articles, en_title, lang)
     tags        = _extract_seo_tags(articles)
 
     words = re.findall(r'\b[A-Za-z]{4,}\b', en_title)
     search_query = " ".join(w for w in words[:5]
-                            if w.lower() not in {"that","this","with","from","have","been","will","were","they"})
+                            if w.lower() not in {"that","this","with","from","have","been"})
     if not search_query:
-        search_query = "Russia Ukraine war news geopolitics"
+        search_query = "Japan Tokyo viral trending culture"
 
     job = {
         "title":        title,
         "description":  description,
         "script":       script,
-        "search_query": search_query,
+        "search_query": search_query + " Japan",
         "lang":         lang,
         "format":       "long",
         "tags":         tags,
-        "category_id":  "25",
+        "category_id":  "24",   # 24 = Entertainment (better fit than News for viral)
         "_meta": {
-            "source":           primary["source"],
-            "original_title":   en_title,
-            "fetched_at":       datetime.datetime.utcnow().isoformat() + "Z",
-            "script_words":     len(en_script.split()),
-            "related_sources":  [a["source"] for a in articles[1:]],
+            "source":          primary["source"],
+            "original_title":  en_title,
+            "fetched_at":      datetime.datetime.utcnow().isoformat() + "Z",
+            "script_words":    len(en_script.split()),
         }
     }
 
@@ -578,16 +506,15 @@ def generate_job(lang: str = "ru", output_path: str = "jobs/current_job.json") -
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(job, f, ensure_ascii=False, indent=2)
 
-    # Save to history so next run picks a different story
     _save_history(history, _story_hash(en_title), en_title)
 
     wc = len(script.split())
     print(f"[NEWS] ✅ Job saved → {output_path}")
-    print(f"[NEWS] Title  : {title}")
-    print(f"[NEWS] Script : {wc} words  (~{wc//130:.1f} min)")
+    print(f"[NEWS] Title: {title}")
+    print(f"[NEWS] Script: {wc} words  (~{wc//120:.1f} min)")
     return job
 
 
 if __name__ == "__main__":
-    lang = sys.argv[1] if len(sys.argv) > 1 else "ru"
+    lang = sys.argv[1] if len(sys.argv) > 1 else "ja"
     generate_job(lang=lang)

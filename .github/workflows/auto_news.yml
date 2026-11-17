@@ -1,20 +1,21 @@
-name: Auto — Fetch News & Upload (scheduled)
+name: Auto — Fetch Japan Viral Content & Upload (scheduled)
 
-# Runs every 8 hours: 06:00, 14:00, 22:00 UTC
-# = 11:00, 19:00, 03:00 Pakistan time
+# Runs 3× daily: 00:00, 08:00, 16:00 UTC
+# = 09:00, 17:00, 01:00 Japan Standard Time (JST = UTC+9)
+# Peak Japanese internet activity: morning commute + evening wind-down
 # Also triggerable manually from GitHub Actions tab
 
 on:
   schedule:
-    - cron: '0 6 * * *'    # 06:00 UTC daily  (11:00 PKT)
-    - cron: '0 14 * * *'   # 14:00 UTC daily  (19:00 PKT)
-    - cron: '0 22 * * *'   # 22:00 UTC daily  (03:00 PKT next day)
+    - cron: '0 0 * * *'    # 00:00 UTC (09:00 JST)
+    - cron: '0 8 * * *'    # 08:00 UTC (17:00 JST)
+    - cron: '0 16 * * *'   # 16:00 UTC (01:00 JST next day)
   workflow_dispatch:
     inputs:
       lang:
-        description: 'Language: ru or en'
+        description: 'Language: ja or en'
         required: false
-        default: 'ru'
+        default: 'ja'
 
 jobs:
   auto-news:
@@ -27,7 +28,8 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-dejavu-extra
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-dejavu-extra \
+            fonts-noto-cjk fonts-noto-cjk-extra
 
       - uses: actions/setup-python@v5
         with:
@@ -41,13 +43,13 @@ jobs:
           echo '${{ secrets.YT_CLIENT_SECRETS_JSON }}' > client_secrets.json
           echo '${{ secrets.YT_TOKEN_JSON }}' > yt_token.json
 
-      - name: Fetch news + render + upload
+      - name: Fetch Japan trending content + render + upload
         run: python src/pipeline.py
         env:
           JOB_FILE: jobs/current_job.json
           PYTHONPATH: ${{ github.workspace }}/src
           AUTO_NEWS: "true"
-          NEWS_LANG: ${{ github.event.inputs.lang || 'ru' }}
+          NEWS_LANG: ${{ github.event.inputs.lang || 'ja' }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           TTS_BACKEND: ${{ secrets.TTS_BACKEND }}
           AZURE_TTS_KEY: ${{ secrets.AZURE_TTS_KEY }}
@@ -57,8 +59,8 @@ jobs:
       - name: Commit story history (prevents repeats on next run)
         if: success()
         run: |
-          git config user.name  "EurasiaBreaking Bot"
-          git config user.email "bot@eurasiabreaking.auto"
+          git config user.name  "JapanViral Bot"
+          git config user.email "bot@japanviral.auto"
           git add jobs/seen_stories.json jobs/current_job.json || true
           git diff --cached --quiet || git commit -m "chore: update story history + job [skip ci]"
           git push || true
@@ -67,7 +69,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: auto-news-${{ github.run_number }}
+          name: auto-japan-${{ github.run_number }}
           path: output/
           if-no-files-found: ignore
           retention-days: 3

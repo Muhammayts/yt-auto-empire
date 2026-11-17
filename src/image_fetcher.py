@@ -5,10 +5,11 @@ Sources tried in order (all free, no API keys required):
   1. Pollinations.ai  — AI-generated realistic images, scene-specific prompts
   2. Openverse        — millions of CC-licensed real photos (no key needed)
   3. Wikimedia Commons — encyclopedia photos (no key needed)
-  4. Fallback card    — generated news card (last resort)
+  4. Fallback card    — generated card (last resort)
 
 Scene-aware: splits script into scenes, extracts keywords per scene,
-fetches 2 matched images per scene for dynamic visuals.
+fetches 1 matched image per scene for dynamic visuals.
+Channel: Japan Viral — Tokyo cityscapes, anime, tech, food, pop culture.
 """
 
 import hashlib
@@ -19,7 +20,7 @@ import urllib.parse
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-HEADERS = {"User-Agent": "EurasiaBreaking/1.0 (news automation bot)"}
+HEADERS = {"User-Agent": "JapanViral/1.0 (content automation bot)"}
 TIMEOUT = 30   # Pollinations can be slow first call
 MIN_DIM = 400
 IMGS_PER_SENTENCE = 1   # 1 image per sentence = maximum visual variety
@@ -34,73 +35,77 @@ def split_into_scenes(script: str) -> list:
     return sentences or [script[:200]]
 
 
-# Russian → English translations for better image generation
-_RU_EN = {
-    "российские": "Russian", "войска": "military troops", "украинские": "Ukrainian",
-    "фронт": "frontline", "наступление": "military offensive", "удары": "airstrikes",
-    "оборона": "defense line", "артиллерия": "artillery", "президент": "president",
-    "переговоры": "peace negotiations", "санкции": "economic sanctions",
-    "нато": "NATO", "солдаты": "soldiers", "танки": "tanks", "взрывы": "explosions",
-    "город": "city", "мирные": "civilians", "жители": "residents",
-    "срочно": "breaking news", "сообщение": "news report", "украина": "Ukraine",
-    "россия": "Russia", "москва": "Moscow", "киев": "Kyiv", "война": "war",
-    "силы": "forces", "позиции": "military positions", "новости": "news",
+# Japanese → English translations for better image generation
+_JA_EN = {
+    "東京": "Tokyo", "大阪": "Osaka", "京都": "Kyoto", "日本": "Japan",
+    "アニメ": "anime", "マンガ": "manga", "ゲーム": "game", "任天堂": "Nintendo",
+    "ソニー": "Sony", "トヨタ": "Toyota", "ラーメン": "ramen", "寿司": "sushi",
+    "桜": "cherry blossoms sakura", "富士山": "Mount Fuji", "相撲": "sumo",
+    "侍": "samurai", "忍者": "ninja", "かわいい": "kawaii cute",
+    "アイドル": "idol jpop", "コスプレ": "cosplay", "ロボット": "robot",
+    "テクノロジー": "technology", "地震": "earthquake", "台風": "typhoon",
+    "渋谷": "Shibuya", "秋葉原": "Akihabara", "原宿": "Harajuku",
+    "新幹線": "bullet train shinkansen", "経済": "economy",
 }
 
 STOPWORDS = {
     "the","a","an","is","are","was","were","has","have","had","will","would",
     "could","should","their","there","this","that","also","just","now","today",
-    "new","latest","breaking","says","said","amid","over","with","from","after",
-    "before","during","and","but","for","not","они","она","мы","вы","он","не",
-    "на","в","и","с","по","к","из","за","о","от","до","что","как","для","при",
-    "его","что","это","так","уже","ещё","где","там","тут","всё","все",
+    "new","latest","trending","says","said","amid","over","with","from","after",
+    "before","during","and","but","for","not","very","been","they","what",
+    "about","which","when","more","some","than","into","only","here",
 }
 
 
 def scene_to_english_query(scene: str) -> str:
-    """Extract keywords and translate Russian → English for image searches."""
-    words = re.findall(r'\b[A-Za-zА-Яа-яЁё]{4,}\b', scene)
+    """Extract keywords and translate Japanese → English for image searches."""
+    # First translate any Japanese characters
+    translated = scene
+    for ja, en in _JA_EN.items():
+        translated = translated.replace(ja, " " + en + " ")
+    words = re.findall(r'\b[A-Za-z]{4,}\b', translated)
     result = []
     for w in words:
         lower = w.lower()
         if lower in STOPWORDS:
             continue
-        result.append(_RU_EN.get(lower, w))
+        result.append(w)
         if len(result) >= 5:
             break
-    return " ".join(result) if result else "Russia news geopolitics"
+    return " ".join(result) if result else "Japan Tokyo viral trending"
 
 
 def scene_to_image_prompt(scene: str, scene_idx: int) -> str:
     """
-    Build a high-quality Pollinations.ai prompt for a realistic news photograph.
-    Focus: landscapes, cityscapes, military hardware, flags, maps, buildings.
-    NO human faces, NO portraits, NO AI-generated people.
-    Alternates between different journalistic angles for variety.
+    Build a high-quality Pollinations.ai prompt for Japan Viral channel.
+    Themes: Tokyo cityscapes, anime art, Japanese food, tech, pop culture,
+    nature (cherry blossoms, Mount Fuji), architecture.
+    NO human faces (keeps AI weirdness away).
+    Alternates between angles for visual variety.
     """
     keywords = scene_to_english_query(scene)
 
     angles = [
-        # Wide city / landscape establishing shot
-        f"wide angle aerial cityscape photograph, {keywords}, "
-        f"dramatic natural lighting, urban skyline, buildings infrastructure, "
-        f"no people no faces, no watermarks no text, ultra realistic 8K",
-        # Military hardware / equipment
-        f"photorealistic documentary photograph, {keywords}, "
-        f"military vehicles tanks aircraft equipment, battlefield landscape, "
-        f"golden hour lighting, NO people NO faces, no logos no text, cinematic realism",
-        # Map / geography / satellite view
-        f"satellite imagery aerial view, {keywords} region geography, "
-        f"topographic landscape, natural terrain, overhead perspective, "
-        f"no people no faces, sharp detail, hyper realistic",
-        # Night city / dramatic skyline
-        f"dramatic night photograph, {keywords}, "
-        f"city lights skyline long exposure, burning horizon smoke, "
-        f"moody cinematic atmosphere, NO people NO faces, no text, photorealistic 4K",
-        # Flags / symbols / government buildings
-        f"documentary photograph, {keywords}, "
-        f"flags government buildings monuments architecture, "
-        f"dramatic sky overcast moody, NO people NO faces, professional camera, photorealistic",
+        # Tokyo/city establishing shot
+        f"wide angle aerial photograph of Tokyo Japan, {keywords}, "
+        f"neon lights city skyline skyscrapers, golden hour sunset, "
+        f"no people no faces, hyper realistic 8K photography, vibrant colors",
+        # Japanese culture / aesthetic
+        f"beautiful Japanese aesthetic photograph, {keywords} Japan, "
+        f"cherry blossoms sakura street traditional shrine torii gate architecture, "
+        f"soft natural light, NO people NO faces, ultra realistic cinematic",
+        # Japanese food / product close-up
+        f"professional food product photography, {keywords} Japan, "
+        f"Japanese cuisine ramen sushi bento colorful presentation, "
+        f"restaurant kitchen setting, NO people, sharp macro detail, vivid colors",
+        # Technology / anime / gaming
+        f"digital art illustration, {keywords} Japan technology, "
+        f"anime style Tokyo futuristic cyberpunk neon, robot gadget console, "
+        f"no people no faces no text, vibrant dramatic lighting, 4K render",
+        # Nature / landscape Japan
+        f"stunning landscape photography Japan, {keywords}, "
+        f"Mount Fuji cherry blossoms bamboo forest temple pagoda, "
+        f"dramatic sky natural lighting, NO people, travel photography 8K",
     ]
     return angles[scene_idx % len(angles)]
 
@@ -310,7 +315,7 @@ def _fetch_for_scene(scene: str, scene_idx: int, count: int,
 
         # 4. Fallback card
         fc = os.path.join(output_dir, f"img_{start_idx+i:04d}_card.jpg")
-        _fallback_card(query, fc)
+        _fallback_card(f"Japan Viral — {query}", fc)
         paths.append(fc)
 
     return paths
