@@ -1,5 +1,5 @@
 """
-Japan Viral News Fetcher — fetches trending/viral content from Japan,
+SugoidesJapan News Fetcher — fetches trending/viral content from Japan,
 generates a 850+ word Japanese-language script, and writes
 jobs/current_job.json.
 
@@ -56,7 +56,7 @@ HOT_KEYWORDS = [
     "major", "historic", "landmark", "worldwide", "global",
 ]
 
-HEADERS      = {"User-Agent": "JapanViral/1.0 RSS Reader"}
+HEADERS      = {"User-Agent": "SugoidesJapan/1.0 RSS Reader"}
 HISTORY_FILE = "jobs/seen_stories.json"
 HISTORY_HOURS = 36
 
@@ -191,7 +191,7 @@ def _build_long_english_script(articles: list) -> str:
 
     # S1: Hook (~80 w)
     s1 = (
-        f"Hello everyone, and welcome back to Japan Viral. "
+        f"Hello everyone, and welcome back to SugoidesJapan. "
         f"Today we are covering a story that is trending all across Japan right now. "
         f"{title}. "
         f"{pick(p,0,'This story is spreading rapidly across Japanese social media and news outlets.')} "
@@ -321,7 +321,7 @@ def _build_long_english_script(articles: list) -> str:
     # S8: Closing CTA (~80 w)
     s8 = (
         f"That is everything we have on this story for now. "
-        f"Japan Viral covers the most interesting, trending, and viral stories from Japan every single day. "
+        f"SugoidesJapan covers the most interesting, trending, and viral stories from Japan every single day. "
         f"If you enjoyed this video, please give it a like — it really helps our channel grow. "
         f"Hit the subscribe button and turn on the notification bell "
         f"so you never miss our daily updates from Japan. "
@@ -336,7 +336,7 @@ def _build_long_english_script(articles: list) -> str:
             " Japan's influence on global pop culture, technology, and lifestyle continues to grow every year. "
             "From the latest anime releases to groundbreaking robotics, from viral food trends to iconic fashion, "
             "Japan never stops surprising and inspiring the rest of the world. "
-            "At Japan Viral we are dedicated to bringing you the most exciting and relevant stories "
+            "At SugoidesJapan we are dedicated to bringing you the most exciting and relevant stories "
             "from this remarkable country, delivered fresh every single day. "
             "Thank you so much for watching and for being part of our growing community of Japan enthusiasts."
         )
@@ -391,7 +391,7 @@ def _translate_title(title: str, target: str = "ja") -> str:
 
 def _extract_seo_tags(articles: list) -> list:
     all_text = " ".join((a["title"]+" "+a["summary"]).lower() for a in articles)
-    base = ["JapanViral","Japan","日本","viral","trending","バイラル","トレンド","日本のニュース"]
+    base = ["SugoidesJapan","Japan","日本","viral","trending","バイラル","トレンド","日本のニュース"]
     kw_map = {
         "anime":     ["anime","アニメ","manga","マンガ"],
         "nintendo":  ["Nintendo","任天堂","gaming","ゲーム"],
@@ -434,13 +434,13 @@ def _build_seo_description(articles: list, en_title: str, lang: str) -> str:
             f"🌍 毎日日本の最新トレンド・バイラルニュースをお届けします！\n\n"
             f"👉 チャンネル登録 | 🔔 通知オン | 👍 高評価\n\n"
             f"⚠️ 本動画は公開情報をもとにした情報提供を目的としています。\n\n"
-            f"#JapanViral #日本 #トレンド #バイラル #日本のニュース "
+            f"#SugoidesJapan #日本 #トレンド #バイラル #日本のニュース "
             f"#アニメ #ゲーム #テクノロジー #日本文化 #東京 "
             f"#Japan #viral #trending #japanews #anime"
         )
     else:
         return (
-            f"🔥 TRENDING | {en_title} | Japan Viral — {date}\n\n"
+            f"🔥 TRENDING | {en_title} | SugoidesJapan — {date}\n\n"
             f"📌 Chapters:\n"
             f"00:00 Intro & Breaking Story\n"
             f"00:45 Full Details\n"
@@ -452,7 +452,7 @@ def _build_seo_description(articles: list, en_title: str, lang: str) -> str:
             f"📡 Source: {source} and major Japanese media\n"
             f"🌍 Daily trending & viral news from Japan!\n\n"
             f"👉 Subscribe | 🔔 Bell | 👍 Like\n\n"
-            f"#JapanViral #Japan #trending #viral #japannews "
+            f"#SugoidesJapan #Japan #trending #viral #japannews "
             f"#anime #gaming #technology #japanculture #tokyo"
         )
 

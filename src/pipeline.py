@@ -35,7 +35,7 @@ def load_job(path: str) -> dict:
 
 def run():
     print(f"\n{'='*60}")
-    print(f"  Japan Viral Pipeline — {datetime.datetime.utcnow().isoformat()}Z")
+    print(f"  SugoidesJapan Pipeline — {datetime.datetime.utcnow().isoformat()}Z")
     print(f"{'='*60}\n")
 
     # Auto-fetch latest news if AUTO_NEWS=true
@@ -52,7 +52,7 @@ def run():
     search_query = job["search_query"]
     lang         = job.get("lang", "ja")            # default Japanese
     format_type  = job.get("format", "long")       # default long-form
-    tags         = job.get("tags", ["Japan", "viral", "JapanViral", "trending"])
+    tags         = job.get("tags", ["Japan", "viral", "SugoidesJapan", "trending"])
     description  = job.get("description", title)
     category_id  = job.get("category_id", "24")   # 24 = Entertainment
 

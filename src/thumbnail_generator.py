@@ -5,7 +5,7 @@ Pipeline:
   1. Generate a vivid background via:
        - Gemini API (google-generativeai) if GEMINI_API_KEY is set
        - Pollinations.ai as free fallback (watermark cropped out)
-  2. Composite Japan Viral overlay using PIL:
+  2. Composite SugoidesJapan overlay using PIL:
        - Dark semi-transparent gradient bar across the bottom
        - "🔥 TRENDING" badge (top-left, red/orange)
        - Headline text (white, bold, word-wrapped)
@@ -25,7 +25,7 @@ import urllib.parse
 import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-HEADERS = {"User-Agent": "JapanViral/1.0"}
+HEADERS = {"User-Agent": "SugoidesJapan/1.0"}
 TIMEOUT = 45
 THUMB_W, THUMB_H = 1280, 720
 
@@ -148,7 +148,7 @@ def _dark_fallback_background(dest: str, keyword: str = ""):
 
 def _add_japan_overlay(img_path: str, headline: str, search_query: str):
     """
-    Add a Japan Viral branded overlay onto the background image.
+    Add a SugoidesJapan branded overlay onto the background image.
     Red/orange trending badge, clean white headline.
     """
     img  = Image.open(img_path).convert("RGBA")
@@ -172,9 +172,9 @@ def _add_japan_overlay(img_path: str, headline: str, search_query: str):
     draw.rounded_rectangle([(20, 20), (20 + bw, 20 + bh)], radius=6, fill=(*ORANGE, 230))
     draw.text((32, 27), badge_text, font=badge_font, fill=(255, 255, 255, 255))
 
-    # ── "JAPAN VIRAL" channel tag ──────────────────────────────────────────────
+    # ── "SUGOIDЕS JAPAN" channel tag ──────────────────────────────────────────────
     ch_font = _load_font(30, bold=True)
-    draw.text((28, H - 46), "JAPAN VIRAL", font=ch_font, fill=(*RED, 240))
+    draw.text((28, H - 46), "SUGOIDESJAPAN", font=ch_font, fill=(*RED, 240))
 
     # ── Main headline (word-wrapped, white) ───────────────────────────────────
     # Strip emoji and Japanese punctuation for safe ASCII rendering if needed

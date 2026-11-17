@@ -1,4 +1,4 @@
-name: Auto — Fetch Japan Viral Content & Upload (scheduled)
+name: Auto — Fetch SugoidesJapan Content & Upload (scheduled)
 
 # Runs 3× daily: 00:00, 08:00, 16:00 UTC
 # = 09:00, 17:00, 01:00 Japan Standard Time (JST = UTC+9)
@@ -59,8 +59,8 @@ jobs:
       - name: Commit story history (prevents repeats on next run)
         if: success()
         run: |
-          git config user.name  "JapanViral Bot"
-          git config user.email "bot@japanviral.auto"
+          git config user.name  "SugoidesJapan Bot"
+          git config user.email "bot@sugoidеsjapan.auto"
           git add jobs/seen_stories.json jobs/current_job.json || true
           git diff --cached --quiet || git commit -m "chore: update story history + job [skip ci]"
           git push || true

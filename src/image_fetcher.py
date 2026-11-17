@@ -9,7 +9,7 @@ Sources tried in order (all free, no API keys required):
 
 Scene-aware: splits script into scenes, extracts keywords per scene,
 fetches 1 matched image per scene for dynamic visuals.
-Channel: Japan Viral — Tokyo cityscapes, anime, tech, food, pop culture.
+Channel: SugoidesJapan — Tokyo cityscapes, anime, tech, food, pop culture.
 """
 
 import hashlib
@@ -20,7 +20,7 @@ import urllib.parse
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-HEADERS = {"User-Agent": "JapanViral/1.0 (content automation bot)"}
+HEADERS = {"User-Agent": "SugoidesJapan/1.0 (content automation bot)"}
 TIMEOUT = 30   # Pollinations can be slow first call
 MIN_DIM = 400
 IMGS_PER_SENTENCE = 1   # 1 image per sentence = maximum visual variety
@@ -77,7 +77,7 @@ def scene_to_english_query(scene: str) -> str:
 
 def scene_to_image_prompt(scene: str, scene_idx: int) -> str:
     """
-    Build a high-quality Pollinations.ai prompt for Japan Viral channel.
+    Build a high-quality Pollinations.ai prompt for SugoidesJapan channel.
     Themes: Tokyo cityscapes, anime art, Japanese food, tech, pop culture,
     nature (cherry blossoms, Mount Fuji), architecture.
     NO human faces (keeps AI weirdness away).
@@ -315,7 +315,7 @@ def _fetch_for_scene(scene: str, scene_idx: int, count: int,
 
         # 4. Fallback card
         fc = os.path.join(output_dir, f"img_{start_idx+i:04d}_card.jpg")
-        _fallback_card(f"Japan Viral — {query}", fc)
+        _fallback_card(f"SugoidesJapan — {query}", fc)
         paths.append(fc)
 
     return paths
