@@ -1,20 +1,19 @@
 """
-SugoidesJapan News Fetcher — fetches trending/viral content from Japan,
-generates a 850+ word Japanese-language script, and writes
-jobs/current_job.json.
+SugoidesJapan Content Fetcher — fetches trending/viral content from Japan
+across ALL categories: news, anime, gaming, food, pop culture, tech,
+weird/funny, travel, sports, music.
 
 Sources (all free, no API key):
-  - NHK World (English → translate to Japanese)
-  - Japan Times
-  - Sora News 24  (viral Japan news)
-  - Anime News Network
-  - The Mainichi
-  - Kyodo News via RSS
-  - Kotaku (gaming/pop culture)
-  - RocketNews24
+  NEWS:        NHK World, Japan Times, The Mainichi, Reuters Asia
+  VIRAL/FUNNY: Sora News 24, RocketNews24
+  ANIME:       Anime News Network, Crunchyroll News
+  GAMING:      Kotaku, IGN Asia, Nintendo Life
+  TECH:        The Verge (Asia), Engadget
+  FOOD/TRAVEL: Japan Bullet, Timeout Tokyo
+  MUSIC/POP:   Billboard Japan (RSS), JpopAsia
 
 Deduplication: tracks used stories in jobs/seen_stories.json
-Script target: 850+ words → ~6-7 min video at ~120 wpm Japanese TTS
+Script target: 850+ words → ~6-7 min video at ~120 wpm TTS
 """
 
 import json, os, re, sys, time, hashlib, datetime, feedparser
@@ -26,35 +25,106 @@ except ImportError:
     TRANSLATE_AVAILABLE = False
     print("[NEWS] deep-translator not installed — scripts will be in English")
 
-# ── RSS Feeds ─────────────────────────────────────────────────────────────────
+# ── RSS Feeds — grouped by category ──────────────────────────────────────────
 RSS_FEEDS = [
-    ("NHK World",      "https://www3.nhk.or.jp/rss/news/cat0.xml"),
-    ("Japan Times",    "https://www.japantimes.co.jp/feed/"),
-    ("Sora News 24",   "https://soranews24.com/feed/"),
-    ("The Mainichi",   "https://mainichi.jp/rss/etc/english.rss"),
-    ("Anime News",     "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us"),
-    ("Kotaku",         "https://kotaku.com/rss"),
-    ("RocketNews24",   "https://en.rocketnews24.com/feed/"),
-    ("Reuters Asia",   "https://feeds.reuters.com/reuters/asiaPacificNews"),
+    # 🗞️ News
+    ("NHK World",        "https://www3.nhk.or.jp/rss/news/cat0.xml"),
+    ("Japan Times",      "https://www.japantimes.co.jp/feed/"),
+    ("The Mainichi",     "https://mainichi.jp/rss/etc/english.rss"),
+    ("Reuters Asia",     "https://feeds.reuters.com/reuters/asiaPacificNews"),
+
+    # 😂 Viral / Weird / Funny Japan
+    ("Sora News 24",     "https://soranews24.com/feed/"),
+    ("RocketNews24",     "https://en.rocketnews24.com/feed/"),
+
+    # 🎌 Anime / Manga
+    ("Anime News",       "https://www.animenewsnetwork.com/all/rss.xml?ann-edition=us"),
+    ("Crunchyroll News", "https://www.crunchyroll.com/newsrss?lang=enUS"),
+
+    # 🎮 Gaming
+    ("Kotaku",           "https://kotaku.com/rss"),
+    ("Nintendo Life",    "https://www.nintendolife.com/feeds/news"),
+    ("IGN",              "https://feeds.ign.com/ign/all"),
+
+    # 📱 Tech
+    ("The Verge",        "https://www.theverge.com/rss/index.xml"),
+    ("Engadget",         "https://www.engadget.com/rss.xml"),
+
+    # 🍜 Food / Travel / Lifestyle
+    ("Time Out Tokyo",   "https://www.timeout.com/tokyo/feed.xml"),
+    ("Japan Bullet",     "https://www.japanbullet.com/feed"),
+
+    # 🎵 Music / Pop Culture
+    ("JpopAsia",         "https://www.jpopasia.com/feed/news/"),
+    ("Billboard JP",     "https://www.billboard-japan.com/d_news/rss"),
 ]
+
+# Category tags for each feed — used for content-aware script writing
+FEED_CATEGORIES = {
+    "NHK World":        "news",
+    "Japan Times":      "news",
+    "The Mainichi":     "news",
+    "Reuters Asia":     "news",
+    "Sora News 24":     "viral",
+    "RocketNews24":     "viral",
+    "Anime News":       "anime",
+    "Crunchyroll News": "anime",
+    "Kotaku":           "gaming",
+    "Nintendo Life":    "gaming",
+    "IGN":              "gaming",
+    "The Verge":        "tech",
+    "Engadget":         "tech",
+    "Time Out Tokyo":   "lifestyle",
+    "Japan Bullet":     "lifestyle",
+    "JpopAsia":         "music",
+    "Billboard JP":     "music",
+}
 
 # Keywords that make a story relevant to our channel
 PRIORITY_KEYWORDS = [
-    "japan", "japanese", "tokyo", "osaka", "kyoto", "anime", "manga",
-    "nintendo", "sony", "toyota", "honda", "fujitsu", "softbank",
-    "akihabara", "harajuku", "shibuya", "idol", "j-pop", "jpop",
-    "ramen", "sushi", "kawaii", "otaku", "cosplay", "samurai",
-    "earthquake", "typhoon", "fujisan", "sumo", "baseball",
-    "trending", "viral", "popular", "new", "record", "first",
-    "technology", "robot", "ai", "gaming", "game", "stream",
-    "prime minister", "election", "economy", "yen", "nikkei",
+    # Places
+    "japan", "japanese", "tokyo", "osaka", "kyoto", "okinawa",
+    "akihabara", "harajuku", "shibuya", "shinjuku", "asakusa",
+    # Anime / Manga
+    "anime", "manga", "otaku", "cosplay", "studio ghibli", "shonen",
+    "demon slayer", "one piece", "naruto", "dragon ball", "jujutsu",
+    # Gaming
+    "nintendo", "sony", "playstation", "switch", "pokemon", "mario",
+    "zelda", "final fantasy", "gaming", "esports", "game",
+    # Tech / Companies
+    "toyota", "honda", "fujitsu", "softbank", "panasonic", "sharp",
+    "robot", "ai", "technology", "electric vehicle", "innovation",
+    # Food
+    "ramen", "sushi", "tempura", "matcha", "sake", "wagyu", "bento",
+    "convenience store", "combini", "michelin", "street food",
+    # Pop culture / Music
+    "idol", "j-pop", "jpop", "k-pop", "kawaii", "samurai", "ninja",
+    "vtuber", "hololive", "tiktok", "viral", "trending",
+    # Nature / Events
+    "cherry blossom", "sakura", "mount fuji", "earthquake", "typhoon",
+    "sumo", "baseball", "world cup", "olympics", "festival", "matsuri",
+    # Economy
+    "yen", "nikkei", "economy", "prime minister", "election",
 ]
 
 HOT_KEYWORDS = [
-    "breaking", "viral", "trending", "record", "first ever", "shocking",
-    "incredible", "amazing", "new release", "announced", "revealed",
-    "major", "historic", "landmark", "worldwide", "global",
+    "viral", "trending", "record", "first ever", "shocking", "incredible",
+    "amazing", "new release", "announced", "revealed", "just dropped",
+    "sells out", "banned", "world record", "unexpected", "surprised",
+    "only in japan", "weird", "hilarious", "unbelievable", "must see",
+    "everyone is talking", "gone viral", "blew up", "legendary",
 ]
+
+# Boost score for non-news categories to balance against heavy news feeds
+CATEGORY_BOOST = {
+    "viral":     25,   # Sora News / RocketNews — almost always Japan-specific
+    "anime":     20,
+    "gaming":    20,
+    "music":     15,
+    "lifestyle": 15,
+    "tech":      10,
+    "news":       0,
+}
 
 HEADERS      = {"User-Agent": "SugoidesJapan/1.0 RSS Reader"}
 HISTORY_FILE = "jobs/seen_stories.json"
@@ -110,6 +180,7 @@ def _fetch_feed(source: str, url: str) -> list:
     try:
         feed = feedparser.parse(url)
         arts = []
+        category = FEED_CATEGORIES.get(source, "news")
         for e in feed.entries[:25]:
             title   = e.get("title","").strip()
             summary = (e.get("content",[{}])[0].get("value","")
@@ -117,9 +188,14 @@ def _fetch_feed(source: str, url: str) -> list:
             summary = re.sub(r'<[^>]+>', ' ', summary)
             summary = re.sub(r'\s+', ' ', summary).strip()
             if title and len(title) > 8:
-                arts.append({"source": source, "title": title,
-                             "summary": summary[:2000], "link": e.get("link","")})
-        print(f"[NEWS] {source}: {len(arts)} articles")
+                arts.append({
+                    "source":   source,
+                    "category": category,
+                    "title":    title,
+                    "summary":  summary[:2000],
+                    "link":     e.get("link",""),
+                })
+        print(f"[NEWS] {source} [{category}]: {len(arts)} articles")
         return arts
     except Exception as e:
         print(f"[NEWS] Failed {source}: {e}")
@@ -128,15 +204,18 @@ def _fetch_feed(source: str, url: str) -> list:
 def _score(article: dict, all_articles: list) -> float:
     text  = (article["title"] + " " + article["summary"]).lower()
     score = sum(10 for kw in PRIORITY_KEYWORDS if kw in text)
-    score += sum(15 for kw in HOT_KEYWORDS if kw in text)
+    score += sum(20 for kw in HOT_KEYWORDS if kw in text)
     score += min(len(article["summary"]) // 60, 15)
+    # Category boost — non-news viral/anime/gaming content gets bumped up
+    score += CATEGORY_BOOST.get(article.get("category","news"), 0)
+    # Cross-feed overlap bonus
     my_words = set(re.findall(r'\b[a-z]{5,}\b', article["title"].lower()))
     for other in all_articles:
         if other is not article:
             other_words = set(re.findall(r'\b[a-z]{5,}\b', other["title"].lower()))
             if len(my_words & other_words) >= 2:
                 score += 12
-    return min(score, 300)
+    return min(score, 400)
 
 def fetch_top_stories(history: dict) -> list:
     all_articles = []
@@ -208,20 +287,66 @@ def _build_long_english_script(articles: list) -> str:
     def pick(lst, i, fb=""): return lst[i] if i < len(lst) else fb
 
     all_text = (title + " " + primary["summary"]).lower()
-    is_anime  = any(w in all_text for w in ["anime","manga","otaku","cosplay","studio"])
-    is_tech   = any(w in all_text for w in ["nintendo","sony","game","robot","ai","technology","app"])
-    is_food   = any(w in all_text for w in ["ramen","sushi","food","restaurant","recipe","eat"])
-    is_celeb  = any(w in all_text for w in ["idol","jpop","j-pop","singer","actor","actress","celebrity"])
-    is_news   = any(w in all_text for w in ["earthquake","typhoon","election","minister","economy","yen"])
+    category  = primary.get("category", "news")
 
-    # S1: Hook (~80 w)
-    s1 = (
-        f"Hello everyone, and welcome back to SugoidesJapan. "
-        f"Today we are covering a story that is trending all across Japan right now. "
-        f"{title}. "
-        f"{pick(p,0,'This story is spreading rapidly across Japanese social media and news outlets.')} "
-        f"Stay with us as we break down everything you need to know about this developing story."
-    )
+    # Fine-grained topic detection (overrides category if needed)
+    is_anime  = category == "anime" or any(w in all_text for w in ["anime","manga","otaku","cosplay","studio ghibli","vtuber"])
+    is_gaming = category == "gaming" or any(w in all_text for w in ["nintendo","playstation","switch","pokemon","mario","zelda","gaming","esports"])
+    is_tech   = category == "tech" or any(w in all_text for w in ["sony","robot","ai","technology","app","electric","innovation","softbank"])
+    is_food   = any(w in all_text for w in ["ramen","sushi","food","restaurant","recipe","eat","matcha","wagyu","bento","combini"])
+    is_music  = category == "music" or any(w in all_text for w in ["idol","jpop","j-pop","singer","actor","actress","celebrity","vtuber","hololive"])
+    is_viral  = category == "viral" or any(w in all_text for w in ["viral","weird","funny","hilarious","only in japan","unusual","bizarre","unbelievable"])
+    is_news   = any(w in all_text for w in ["earthquake","typhoon","election","minister","economy","yen","disaster"])
+
+    # S1: Hook — tone varies by category (~80 w)
+    if is_viral:
+        s1 = (
+            f"Oh my goodness, you are NOT going to believe this one. Welcome back to SugoidesJapan! "
+            f"Today's story is absolutely wild, and it comes straight out of Japan. "
+            f"{title}. "
+            f"{pick(p,0,'This is exactly the kind of only-in-Japan story that makes the internet go crazy.')} "
+            f"Stick around because this one gets better and better the more you hear about it."
+        )
+    elif is_anime:
+        s1 = (
+            f"Anime fans, this one is for you! Welcome back to SugoidesJapan. "
+            f"Today we are talking about something the entire anime community cannot stop discussing. "
+            f"{title}. "
+            f"{pick(p,0,'This news has sent shockwaves through the anime fandom worldwide.')} "
+            f"Let us dive in and break down everything you need to know."
+        )
+    elif is_gaming:
+        s1 = (
+            f"Gamers, listen up — this is HUGE! Welcome back to SugoidesJapan. "
+            f"Today we are covering some massive gaming news straight from Japan. "
+            f"{title}. "
+            f"{pick(p,0,'The gaming world is buzzing about this right now and for very good reason.')} "
+            f"Let us get into every single detail."
+        )
+    elif is_music:
+        s1 = (
+            f"Hey everyone, welcome back to SugoidesJapan! "
+            f"Japan's music and entertainment scene just gave us something incredible to talk about. "
+            f"{title}. "
+            f"{pick(p,0,'This is blowing up across Japanese social media and fan communities worldwide.')} "
+            f"Here is everything you need to know."
+        )
+    elif is_food:
+        s1 = (
+            f"Food lovers, this one is going to make you hungry! Welcome back to SugoidesJapan. "
+            f"Japan's incredible food scene has done it again with something truly special. "
+            f"{title}. "
+            f"{pick(p,0,'Food lovers around the world are talking about this right now.')} "
+            f"Let us take a deep and delicious dive into this story."
+        )
+    else:
+        s1 = (
+            f"Hello everyone, and welcome back to SugoidesJapan. "
+            f"Today we are covering a story that is trending all across Japan right now. "
+            f"{title}. "
+            f"{pick(p,0,'This story is spreading rapidly across Japanese social media and news outlets.')} "
+            f"Stay with us as we break down everything you need to know."
+        )
 
     # S2: What's happening (~130 w)
     det = " ".join(filter(None,[pick(p,1),pick(p,2),pick(p,3)]))
@@ -263,15 +388,37 @@ def _build_long_english_script(articles: list) -> str:
     )
 
     # S5: Deep context — topic-aware (~150 w)
-    if is_anime:
+    if is_viral:
         s5 = (
-            f"To understand why this matters so much in Japan, we need to look at the broader anime and manga landscape. "
+            f"You know, Japan has a very special relationship with going viral. "
+            f"Japanese internet culture is one of the most unique and creative in the entire world. "
+            f"Platforms like Twitter Japan — one of the most active Twitter communities globally — "
+            f"can take a single funny or bizarre story and turn it into a national conversation overnight. "
+            f"Japan's culture of craftsmanship, attention to detail, and love of the quirky and unexpected "
+            f"means that incredible, weird, and wonderful things happen there all the time. "
+            f"Japanese people have a word for it — 'sugoi' — which means amazing, incredible, unbelievable. "
+            f"And honestly, that is exactly the right word for what we are talking about today."
+        )
+    elif is_anime:
+        s5 = (
+            f"To understand why this matters so much, let us look at the anime industry. "
             f"Japan's animation industry generates over two trillion yen annually and employs hundreds of thousands of people. "
             f"Anime is no longer just a Japanese cultural product — it is a global phenomenon, "
             f"with streaming platforms like Netflix, Crunchyroll, and Amazon Prime competing fiercely for rights. "
             f"The global anime market has grown by over fifty percent in the last five years alone. "
             f"What happens in Japan's anime industry often sets trends that ripple across entertainment worldwide. "
             f"This latest development is a perfect example of how the industry continues to evolve and surprise fans."
+        )
+    elif is_gaming:
+        s5 = (
+            f"Japan is the birthplace of modern gaming as we know it. "
+            f"Nintendo, Sony PlayStation, Sega, Capcom, Square Enix — virtually every iconic gaming brand "
+            f"you grew up with traces its roots back to Japan. "
+            f"The global video game industry is worth over two hundred billion dollars, "
+            f"and Japanese companies are responsible for some of its most beloved franchises: "
+            f"Mario, Zelda, Pokemon, Final Fantasy, Monster Hunter, Street Fighter — the list goes on forever. "
+            f"When something major happens in Japanese gaming, the entire world's gaming community pays attention. "
+            f"Today's story is a perfect example of why Japan still leads the way."
         )
     elif is_tech:
         s5 = (
@@ -280,33 +427,32 @@ def _build_long_english_script(articles: list) -> str:
             f"Japan has consistently led the world in technological innovation. "
             f"Today, Japanese companies like Sony, Nintendo, Toyota, and SoftBank continue to shape "
             f"how the world interacts with technology. "
-            f"The gaming industry alone, dominated by Japanese giants, generates billions of dollars globally each year. "
-            f"Robotics and artificial intelligence are also areas where Japan holds a commanding position, "
-            f"with the country investing heavily in automation to address its aging population challenge."
+            f"Robotics and artificial intelligence are areas where Japan holds a commanding position, "
+            f"with the country investing heavily in automation to address its aging population challenge. "
+            f"This story shows once again why Japan's tech sector remains one of the most exciting to watch."
         )
     elif is_food:
         s5 = (
             f"Japanese food culture is one of the most admired in the entire world, "
-            f"and it continues to evolve in exciting ways. "
+            f"and it continues to evolve in the most exciting ways. "
             f"Japan has more Michelin-starred restaurants than any other country on earth, "
             f"with Tokyo alone holding over two hundred stars — more than Paris and New York combined. "
             f"But Japanese food culture is not just about fine dining. "
             f"It is about the craftsmanship and dedication to quality that goes into every bowl of ramen, "
-            f"every piece of sushi, and every cup of matcha. "
+            f"every piece of sushi, and every cup of matcha tea. "
             f"Food trends that start in Japan regularly spread worldwide, "
             f"making this story especially interesting for food lovers everywhere."
         )
-    elif is_celeb:
+    elif is_music:
         s5 = (
             f"Japanese pop culture and entertainment have an enormous global footprint. "
             f"J-pop and idol culture have millions of dedicated fans not just in Japan "
             f"but across Asia, Europe, and North America. "
-            f"Groups like AKB48 and artists managed by major agencies continue to dominate charts "
-            f"and fill arenas around the world. "
+            f"VTubers — virtual YouTubers pioneered by Japanese companies like Hololive — "
+            f"have taken the streaming world by storm with millions of subscribers globally. "
             f"The idol industry in Japan is a multi-billion yen business built on fan devotion, "
-            f"meticulously crafted public images, and an almost unparalleled level of engagement between "
-            f"artists and their communities. "
-            f"When something happens in this world, millions of fans worldwide pay close attention."
+            f"meticulously crafted public images, and an almost unparalleled level of engagement. "
+            f"When something happens in this world, millions of fans worldwide pay very close attention."
         )
     else:
         s5 = (
