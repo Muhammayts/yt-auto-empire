@@ -17,6 +17,10 @@ on:
         required: false
         default: 'ja'
 
+# REQUIRED: allows the bot to push seen_stories.json back to the repo
+permissions:
+  contents: write
+
 jobs:
   auto-news:
     runs-on: ubuntu-latest
@@ -24,6 +28,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Use the built-in GITHUB_TOKEN so the push is authenticated
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Install system dependencies
         run: |
@@ -43,6 +51,11 @@ jobs:
           echo '${{ secrets.YT_CLIENT_SECRETS_JSON }}' > client_secrets.json
           echo '${{ secrets.YT_TOKEN_JSON }}' > yt_token.json
 
+      - name: Show current story history (debug)
+        run: |
+          echo "=== Seen stories BEFORE this run ==="
+          cat jobs/seen_stories.json 2>/dev/null | python3 -m json.tool || echo "(empty)"
+
       - name: Fetch Japan trending content + render + upload
         run: python src/pipeline.py
         env:
@@ -56,14 +69,28 @@ jobs:
           AZURE_TTS_REGION: ${{ secrets.AZURE_TTS_REGION }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
-      - name: Commit story history (prevents repeats on next run)
-        if: success()
+      - name: Save story history to repo (prevents repeats next run)
+        if: always()
         run: |
+          echo "=== Seen stories AFTER this run ==="
+          cat jobs/seen_stories.json 2>/dev/null | python3 -m json.tool || echo "(empty)"
+
           git config user.name  "SugoidesJapan Bot"
           git config user.email "bot@sugoidеsjapan.auto"
-          git add jobs/seen_stories.json jobs/current_job.json || true
-          git diff --cached --quiet || git commit -m "chore: update story history + job [skip ci]"
-          git push || true
+
+          # Pull latest to avoid push rejection if another run just finished
+          git pull --rebase origin main || true
+
+          git add jobs/seen_stories.json jobs/current_job.json
+
+          # Only commit if something actually changed
+          if git diff --cached --quiet; then
+            echo "No history changes to commit."
+          else
+            git commit -m "chore: update story history [skip ci]"
+            git push origin main
+            echo "✅ Story history saved to repo."
+          fi
 
       - name: Upload video artifact (backup)
         if: always()

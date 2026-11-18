@@ -104,7 +104,7 @@ def run():
         description=description,
         tags=tags,
         category_id=category_id,
-        privacy_status="public",
+        privacy_status="private",
     )
 
     # ── 6. Upload thumbnail ────────────────────────────────────────────────
@@ -113,7 +113,7 @@ def run():
     print(f"\n[Pipeline] 🎉 DONE!")
     print(f"[Pipeline] Video ID : {video_id}")
     print(f"[Pipeline] Studio   : https://studio.youtube.com/video/{video_id}/edit")
-    print(f"[Pipeline] ✅ Video is PUBLIC — live at https://youtube.com/watch?v={video_id}\n")
+    print(f"[Pipeline] ⚠️  Video is PRIVATE — publish manually in YouTube Studio.\n")
 
     with open(os.path.join(OUTPUT_DIR, "result.json"), "w") as f:
         json.dump({

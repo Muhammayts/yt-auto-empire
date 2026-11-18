@@ -58,7 +58,7 @@ HOT_KEYWORDS = [
 
 HEADERS      = {"User-Agent": "SugoidesJapan/1.0 RSS Reader"}
 HISTORY_FILE = "jobs/seen_stories.json"
-HISTORY_HOURS = 36
+HISTORY_HOURS = 72   # skip any story seen in last 72 hours (3 days)
 
 
 # ── Deduplication ─────────────────────────────────────────────────────────────
@@ -67,28 +67,39 @@ def _story_hash(title: str) -> str:
     return hashlib.md5(re.sub(r'\W+', ' ', title.lower()).strip().encode()).hexdigest()[:12]
 
 def _load_history() -> dict:
-    if os.path.exists(HISTORY_FILE):
-        try:
-            with open(HISTORY_FILE, encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
+    # Try multiple locations — workspace root AND jobs/ subdir
+    for path in [HISTORY_FILE, os.path.join(os.getcwd(), HISTORY_FILE)]:
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                print(f"[NEWS] Loaded history: {len(data)} seen stories from {path}")
+                return data
+            except Exception as e:
+                print(f"[NEWS] History load error at {path}: {e}")
+    print("[NEWS] No history file found — all stories treated as new")
     return {}
 
 def _save_history(history: dict, new_hash: str, title: str):
-    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=7)).isoformat()
+    # Keep last 14 days only
+    cutoff = (datetime.datetime.utcnow() - datetime.timedelta(days=14)).isoformat()
     history = {k: v for k, v in history.items() if v.get("seen_at","") > cutoff}
     history[new_hash] = {"title": title, "seen_at": datetime.datetime.utcnow().isoformat()+"Z"}
     os.makedirs(os.path.dirname(HISTORY_FILE) or ".", exist_ok=True)
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+    print(f"[NEWS] History saved: {len(history)} total entries in {HISTORY_FILE}")
 
 def _was_recently_used(h: str, history: dict) -> bool:
     if h not in history:
         return False
     try:
         seen = datetime.datetime.fromisoformat(history[h]["seen_at"].rstrip("Z"))
-        return (datetime.datetime.utcnow() - seen).total_seconds() / 3600 < HISTORY_HOURS
+        hours_ago = (datetime.datetime.utcnow() - seen).total_seconds() / 3600
+        if hours_ago < HISTORY_HOURS:
+            print(f"[NEWS] Skipping (seen {hours_ago:.1f}h ago): {history[h].get('title','')[:60]}")
+            return True
+        return False
     except Exception:
         return False
 
@@ -148,8 +159,22 @@ def fetch_top_stories(history: dict) -> list:
     scored = sorted(unique, key=lambda a: _score(a, all_articles), reverse=True)
 
     # Pick freshest unseen story
-    primary = next((a for a in scored if not _was_recently_used(_story_hash(a["title"]), history)),
-                   scored[0])
+    unseen = [a for a in scored if not _was_recently_used(_story_hash(a["title"]), history)]
+    if unseen:
+        primary = unseen[0]
+        print(f"[NEWS] ✅ Fresh story found ({len(unseen)} unseen out of {len(scored)} total)")
+    else:
+        # All stories seen recently — pick the least-recently-used one
+        print(f"[NEWS] ⚠️  All {len(scored)} stories were seen recently — picking oldest")
+        def _age(a):
+            h = _story_hash(a["title"])
+            if h not in history: return 0
+            try:
+                seen = datetime.datetime.fromisoformat(history[h]["seen_at"].rstrip("Z"))
+                return (datetime.datetime.utcnow() - seen).total_seconds()
+            except Exception:
+                return 0
+        primary = max(scored, key=_age)
 
     # Related articles
     p_words  = set(re.findall(r'\b[a-z]{5,}\b', primary["title"].lower()))
