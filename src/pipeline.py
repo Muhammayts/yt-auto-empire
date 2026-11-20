@@ -91,10 +91,12 @@ def run():
 
     # ── 4. Generate thumbnail ──────────────────────────────────────────────
     print(f"[Pipeline] Generating thumbnail...")
+    category = job.get("category", "default")
     thumb_path = generate_thumbnail(
         title=title,
         search_query=search_query,
         output_dir=OUTPUT_DIR,
+        category=category,
     )
 
     # ── 5. Upload to YouTube ───────────────────────────────────────────────

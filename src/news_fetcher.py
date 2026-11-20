@@ -665,6 +665,7 @@ def generate_job(lang: str = "ja", output_path: str = "jobs/current_job.json") -
         "format":       "long",
         "tags":         tags,
         "category_id":  "24",   # 24 = Entertainment (better fit than News for viral)
+        "category":     primary.get("category", "default"),  # used by thumbnail_generator
         "_meta": {
             "source":          primary["source"],
             "original_title":  en_title,
