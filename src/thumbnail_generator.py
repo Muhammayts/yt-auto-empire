@@ -71,33 +71,71 @@ def _load_font(size: int, bold: bool = True):
 def _gemini_background(prompt: str, dest: str) -> bool:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
+        print("[THUMB/Gemini] No API key — skipping")
         return False
+
+    full_prompt = (
+        f"Ultra-vibrant cinematic Japan photograph, {prompt}, "
+        f"dramatic backlighting, oversaturated vivid colors, lens flare, "
+        f"NO people NO human faces, 16:9 widescreen, no text no watermarks, 4K"
+    )
+
+    # ── Try Imagen 3 first (best quality) ─────────────────────────────────────
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp-image-generation")
-        full_prompt = (
-            f"Ultra-vibrant cinematic Japan photograph, {prompt}, "
-            f"dramatic backlighting, oversaturated vivid colors, lens flare, "
-            f"NO people NO human faces, 16:9 widescreen, no text no watermarks, 4K"
+        from google import genai as google_genai
+        from google.genai import types as genai_types
+
+        client = google_genai.Client(api_key=api_key)
+        response = client.models.generate_images(
+            model="imagen-3.0-generate-002",
+            prompt=full_prompt,
+            config=genai_types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="16:9",
+                safety_filter_level="BLOCK_ONLY_HIGH",
+                person_generation="DONT_ALLOW",
+            ),
         )
-        response = model.generate_content(
-            full_prompt,
-            generation_config={"response_modalities": ["IMAGE"]},
+        if response.generated_images:
+            import base64
+            img_bytes = response.generated_images[0].image.image_bytes
+            with open(dest, "wb") as f:
+                f.write(img_bytes)
+            img = Image.open(dest).convert("RGB")
+            img = img.resize((THUMB_W, THUMB_H), Image.LANCZOS)
+            img.save(dest, "JPEG", quality=95)
+            print(f"[THUMB/Gemini] ✅ Imagen 3 background generated")
+            return True
+    except Exception as e:
+        print(f"[THUMB/Gemini] Imagen 3 failed: {e}")
+
+    # ── Fallback: Gemini 2.0 Flash image generation ────────────────────────────
+    try:
+        from google import genai as google_genai
+        from google.genai import types as genai_types
+
+        client = google_genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-preview-image-generation",
+            contents=full_prompt,
+            config=genai_types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+            ),
         )
+        import base64
         for part in response.candidates[0].content.parts:
             if hasattr(part, "inline_data") and part.inline_data:
-                import base64
                 img_bytes = base64.b64decode(part.inline_data.data)
                 with open(dest, "wb") as f:
                     f.write(img_bytes)
                 img = Image.open(dest).convert("RGB")
                 img = img.resize((THUMB_W, THUMB_H), Image.LANCZOS)
                 img.save(dest, "JPEG", quality=95)
-                print(f"[THUMB/Gemini] ✅ Background generated")
+                print(f"[THUMB/Gemini] ✅ Gemini 2.0 Flash background generated")
                 return True
     except Exception as e:
-        print(f"[THUMB/Gemini] Failed: {e}")
+        print(f"[THUMB/Gemini] Flash fallback failed: {e}")
+
     return False
 
 
